@@ -18,7 +18,7 @@ func vintLen(b byte) int {
 
 // parseElementID parses EBML Element ID VINT (1..4 bytes).
 // The returned id includes the length marker bits (as defined by EBML).
-func parseElementID(b []byte) (id uint32, n int, err error) {
+func parseElementID(b []byte) (id ElementID, n int, err error) {
 	if len(b) < 1 {
 		return 0, 0, NeedMoreData{MinBytes: 1}
 	}
@@ -31,9 +31,9 @@ func parseElementID(b []byte) (id uint32, n int, err error) {
 	if len(b) < n {
 		return 0, 0, NeedMoreData{MinBytes: n - len(b)}
 	}
-	var v uint32
+	var v ElementID
 	for i := 0; i < n; i++ {
-		v = (v << 8) | uint32(b[i])
+		v = (v << 8) | ElementID(b[i])
 	}
 	return v, n, nil
 }

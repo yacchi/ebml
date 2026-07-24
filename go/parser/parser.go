@@ -17,24 +17,27 @@ const (
 )
 
 type ElementHeader struct {
-	ID        uint32
+	ID        ElementID
 	Size      int64 // -1 means unknown-size
 	Kind      Kind
 	HeaderLen int
 }
 
 type elementCtx struct {
-	id   uint32
+	id   ElementID
 	size int64
 	kind Kind
 }
 
 type masterFrame struct {
-	id        uint32
+	id        ElementID
 	endOffset int64 // -1 means unknown-size
 }
 
-type KindClassifier func(id uint32) Kind
+// KindClassifier maps an element ID to the kind the cursor should treat it as.
+// Pass one with WithKindClassifier; matroska.KindForElementID covers the
+// standard Matroska element set.
+type KindClassifier func(id ElementID) Kind
 
 type Option func(*Parser)
 
@@ -59,7 +62,7 @@ func New(opts ...Option) *Parser {
 	p := &Parser{
 		buf: make([]byte, 0, 4096),
 	}
-	p.kindClassifier = KindForElementID
+	p.kindClassifier = defaultKindClassifier
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -216,7 +219,7 @@ func (p *Parser) CloseMaster() error {
 }
 
 type ClosedMaster struct {
-	ID    uint32
+	ID    ElementID
 	Depth int // depth before pop
 }
 
@@ -329,8 +332,10 @@ func (p *Parser) ReadPayload() ([]byte, error) {
 	return out, nil
 }
 
-func FormatID(id uint32) string {
-	// Minimal formatting for tests/logging: lowercase hex without "0x".
+// FormatID renders an element ID as bare lowercase hex without a "0x" prefix
+// (the form used by the golden event logs). For the conventional EBML notation
+// use ElementID.String.
+func FormatID(id ElementID) string {
 	// Preserve full bytes for the ID length by left-trimming zero bytes.
 	var b [4]byte
 	b[0] = byte(id >> 24)

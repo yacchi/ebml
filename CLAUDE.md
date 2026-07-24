@@ -51,37 +51,60 @@ library aims to be that cursor.
 - VINT parsing incl. unknown-size detection (`go/parser/vint.go`), enforcing
   `MaxElementIDLength`/`MaxElementSizeLength` (`go/parser/elements.go`) and
   reporting over-length VINTs as `VINTLengthError` (`go/parser/errors.go`).
+- **Typed element IDs and registry API**: `parser.ElementID`
+  (`go/parser/elements.go`) is the wire VINT value *including* its length-marker
+  bits, and flows through `ElementHeader.ID`, `KindClassifier`, `ClosedMaster`
+  and the typed errors. Its `String()` is the EBML-conventional form
+  (`0xA3`, `0x1F43B675`). `parser` keeps **no element table**: it has only an
+  unexported default classifier that treats the EBML header and `Segment` as
+  masters and everything else as a binary leaf, so real streams must be driven
+  with `matroska.KindForElementID`. `go/matroska` is the single source of truth:
+  its registry API provides `Lookup`, `NameForID`, `Describe`, `IDForName`,
+  `Elements`, `TypeFor`, and `ValueType` (whose `String()` gives the value type
+  label), alongside an `ID<Name>` constant for every registered element, such
+  as `matroska.IDSegmentUUID`. Element names/IDs/types follow **RFC 9559** (it
+  supersedes the older matroska.org names — `SegmentUUID`, `FileMediaType`,
+  `Timestamp`/`TimestampScale`); `IDForName` additionally accepts well-known
+  pre-RFC names as aliases, and only `IDForName` does. `TypeBlock`
+  (`SimpleBlock`/`Block`) is a deliberate library-level refinement of the RFC's
+  binary type, not a spec type.
 - **Malformed-input guards**: `FinalizeEOF` reports EOF inside a partial header
   or unfinished declared payload as `TruncatedError`, and a child element whose
   extent overflows its known-size parent master yields `ElementOverflowError`
   (`go/parser/errors.go`, exercised in `go/parser/defects_test.go`).
   `ParseSimpleBlock` rejects track number 0; reserved flag bits (0x70) are
   deliberately tolerated.
-- **KVS Matroska element IDs + classifier** (`go/parser/kvs_elements.go`):
-  `KVSNameForElementID`, `KVSKindForElementID`, `IsTopLevelElementID`. Drive the
-  parser with `parser.New(parser.WithKindClassifier(parser.KVSKindForElementID))`
-  so `Segment`/`Cluster`/`Tags`/`Tracks`/`TrackEntry`/`SimpleBlock`/... classify
-  as master vs leaf correctly. (Without a classifier, unknown IDs default to a
-  binary leaf, so a `Cluster` would be read as one opaque blob.) `CRC-32` and
+- **Standard Matroska element registry + generic classifier** (`go/matroska/`):
+  `KindForElementID`, the element table (keyed by `parser.ElementID`) and the
+  `ID<Name>` constants — the single source of truth for element IDs and
+  names, used by `fragment`, the CLI and the fixture generator. Drive the parser with
+  `parser.New(parser.WithKindClassifier(matroska.KindForElementID))` so
+  `Segment`/`Cluster`/`Tags`/`Tracks`/`TrackEntry`/`SimpleBlock`/... classify
+  as master vs leaf correctly. (Without it the parser's minimal default
+  classifier applies, so a `Cluster` would be read as one opaque binary blob.) `CRC-32` and
   `Void` elements classify as skippable binary leaves — their bytes are not
-  validated/interpreted, just skipped by declared size.
+  validated/interpreted, just skipped by declared size. `parser` stays the
+  bottom layer and does not import `matroska`; the KVS stream needs no
+  library-side special elements — the standard registry covers it and
+  consumers read AWS metadata themselves via the generic tag map.
 - **Leaf value decoding** (`go/parser/decode.go`, `go/parser/block.go`):
   `DecodeUint`, `DecodeInt`, `DecodeFloat`, `DecodeString` for scalar leaf
   payloads, and `ParseSimpleBlock` for a Matroska `SimpleBlock` (track-number
   VINT, int16 relative timecode, flags, and Xiph/fixed/EBML lacing) into a
   `*SimpleBlock` with per-frame `[][]byte`.
-- **Per-fragment assembly** (`go/fragment/`): `fragment.New()` returns an
-  `Assembler` that drives the cursor over a KVS GetMedia byte stream and emits
-  one `*Fragment` per completed `Cluster`, with that Segment's buffered
+- **Generic per-fragment assembly** (`go/fragment/`): `fragment.New()` returns an
+  `Assembler` that drives the cursor over a continuous EBML/Matroska byte stream
+  and emits one `*Fragment` per completed `Cluster`, with that Segment's buffered
   `Tags`/`Tracks` attached (`Tags`, `Tracks`, `ClusterTimestamp`, `Blocks`).
-  `Fragment` exposes `Tag`, `FragmentNumber`, `ContinuationToken`,
-  `ProducerTimestamp`, and `TrackPCM(trackNumber)`. A Segment with multiple
+  `Fragment` exposes a generic `Tag(name)` accessor (consumers read
+  AWS metadata like `AWS_KINESISVIDEO_FRAGMENT_NUMBER` themselves) and
+  `TrackPCM(trackNumber)`. A Segment with multiple
   Clusters yields multiple Fragments sharing its Tags/Tracks; a tagless
   Segment yields a Fragment with an empty tag map. See
   `go/fragment/example_test.go` (`Example_streamingAssembly`).
 - **Synthetic KVS test corpus** proving the KVS topology and real-world quirks:
   `fixtures/kvs/*.ebml.hex` + `golden/kvs/*.jsonl`, exercised by
-  `go/parser/kvs_fixture_test.go` across every split pattern. 9 cases:
+  `go/matroska/kvs_fixture_test.go` across every split pattern. 9 cases:
   - `topology_basic`, `tail_last_fragment` — known-size Cluster inside an
     unknown-size Segment; the Segment is closed **only** by `FinalizeEOF`, while
     the Cluster's end is observable earlier (the tail-fix property).
@@ -92,8 +115,12 @@ library aims to be that cursor.
     emitting its own Fragment.
   - `multi_segment`, `tagless_single`, `tagless_consecutive`, `filter_mismatch`
     (ContactId change mid-stream), `gap` (dropped fragment).
-- **Fixture generator** (100% synthetic): `go/internal/kvsgen/` +
-  `go/cmd/genkvs/`.
+- **Fixture generator** (100% synthetic): `go/internal/kvsgen/`, driven by the
+  `genkvs` subcommand of `go/cmd/ebml-reader/`.
+- **CLI** (`go/cmd/ebml-reader/`, binary `ebml-reader`): `dump` (indented
+  element tree), `xml` (well-formed XML), and `genkvs` (regenerate the fixture
+  corpus). `dump`/`xml` stream raw EBML from a FILE or stdin; `--hex` decodes the
+  commented-hex fixture format instead.
 - **Fuzz target**: `FuzzParser` (`go/parser/fuzz_test.go`) seeds from the
   committed fixtures and drives the cursor over arbitrary/mutated bytes,
   guarding against panics on malformed input.
@@ -122,11 +149,14 @@ Run from the `go/` directory:
 ```bash
 go test ./...        # tiny fixture + all KVS fixtures across every split pattern
 go vet ./...
-go run ./cmd/genkvs  # regenerate fixtures/kvs/*.ebml.hex + golden/kvs/*.jsonl + README.json
+go run ./cmd/ebml-reader genkvs  # regenerate fixtures/kvs/*.ebml.hex + golden/kvs/*.jsonl + README.json
 ```
 
 ## Conventions
 
+- **Commit messages are English too** (Conventional Commits). The English-only
+  rule at the top of this file covers git history, not just the tree — it
+  overrides any personal/global convention that defaults to another language.
 - **Fixtures** (`fixtures/**/*.ebml.hex`): commented hex — `#` lines describe the
   layout; the body is whitespace-separated hex bytes.
 - **Golden** (`golden/**/*.jsonl`): one JSON object per cursor event —
@@ -136,7 +166,7 @@ go run ./cmd/genkvs  # regenerate fixtures/kvs/*.ebml.hex + golden/kvs/*.jsonl +
 - **Data safety (hard rule):** every fixture is **100% synthetic** — fake UUIDs,
   counter/tone PCM, synthetic tokens. **Never** commit real capture data (real
   ContactId / InstanceId / customer audio). This repo is OSS-destined; regenerate
-  synthetic data via `cmd/genkvs`, never derive fixtures from a real capture.
+  synthetic data via `ebml-reader genkvs`, never derive fixtures from a real capture.
 
 ## KVS / Matroska structure reference
 
@@ -147,7 +177,7 @@ go run ./cmd/genkvs  # regenerate fixtures/kvs/*.ebml.hex + golden/kvs/*.jsonl +
 - AWS metadata lives in `Tags` → `SimpleTag` (`TagName`/`TagString`):
   `AWS_KINESISVIDEO_PRODUCER_TIMESTAMP`, `AWS_KINESISVIDEO_FRAGMENT_NUMBER`,
   `AWS_KINESISVIDEO_CONTINUATION_TOKEN`, `ContactId`, `InstanceId`.
-- All element IDs used above are defined in `go/parser/kvs_elements.go`; verify
+- All element IDs used above are defined in `go/matroska/elements.go`; verify
   any additions against the Matroska specification.
 
 ## Scope note

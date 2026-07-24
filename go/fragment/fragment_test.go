@@ -6,10 +6,22 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yacchi/ebml-reader/fragment"
+)
+
+// Well-known AWS KVS tag names used by the fixtures under fixtures/kvs/. These
+// are consumer conventions, not part of the generic fragment package API; see
+// examples/kvs-getmedia for how a real consumer would read them via
+// fragment.Fragment.Tag.
+const (
+	tagFragmentNumber    = "AWS_KINESISVIDEO_FRAGMENT_NUMBER"
+	tagContinuationToken = "AWS_KINESISVIDEO_CONTINUATION_TOKEN"
+	tagProducerTimestamp = "AWS_KINESISVIDEO_PRODUCER_TIMESTAMP"
 )
 
 // loadHex reads a fixtures/kvs/<name>.ebml.hex file, stripping comment lines
@@ -122,6 +134,36 @@ func mustTag(t *testing.T, f *fragment.Fragment, name string) string {
 	return v
 }
 
+// parseDecimalSeconds converts a decimal seconds-since-epoch string (as used by
+// the tagProducerTimestamp fixture values) into a UTC time.Time. Up to 9
+// fractional digits are honored as nanoseconds; extra digits are truncated.
+func parseDecimalSeconds(t *testing.T, s string) time.Time {
+	t.Helper()
+	intPart, fracPart := s, ""
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		intPart, fracPart = s[:i], s[i+1:]
+	}
+	sec, err := strconv.ParseInt(intPart, 10, 64)
+	if err != nil {
+		t.Fatalf("parse producer timestamp %q: %v", s, err)
+	}
+	var nsec int64
+	if fracPart != "" {
+		if len(fracPart) > 9 {
+			fracPart = fracPart[:9]
+		}
+		f, err := strconv.ParseInt(fracPart, 10, 64)
+		if err != nil {
+			t.Fatalf("parse producer timestamp %q: %v", s, err)
+		}
+		for i := len(fracPart); i < 9; i++ {
+			f *= 10
+		}
+		nsec = f
+	}
+	return time.Unix(sec, nsec).UTC()
+}
+
 // allFixtures is every committed KVS fixture.
 var allFixtures = []string{
 	"topology_basic",
@@ -205,16 +247,20 @@ func TestTopologyBasic(t *testing.T) {
 	if got := mustTag(t, f, "InstanceId"); got == "" {
 		t.Fatalf("InstanceId empty")
 	}
-	fn, ok := f.FragmentNumber()
+	fn, ok := f.Tag(tagFragmentNumber)
 	if !ok || fn != "91343852333181000000000000000000000000000000001" {
 		t.Fatalf("FragmentNumber = %q ok=%v", fn, ok)
 	}
-	if _, ok := f.ContinuationToken(); !ok {
+	if _, ok := f.Tag(tagContinuationToken); !ok {
 		t.Fatalf("ContinuationToken missing")
 	}
-	ts, ok := f.ProducerTimestamp()
-	if !ok || ts.Unix() != 1000000000 || ts.Nanosecond() != 0 {
-		t.Fatalf("ProducerTimestamp = %v ok=%v", ts, ok)
+	tsStr, ok := f.Tag(tagProducerTimestamp)
+	if !ok {
+		t.Fatalf("ProducerTimestamp missing")
+	}
+	ts := parseDecimalSeconds(t, tsStr)
+	if ts.Unix() != 1000000000 || ts.Nanosecond() != 0 {
+		t.Fatalf("ProducerTimestamp = %v", ts)
 	}
 
 	if len(f.Tracks) != 1 {
@@ -260,7 +306,7 @@ func TestTailLastFragment(t *testing.T) {
 	if len(tail.Blocks) != 2 {
 		t.Fatalf("tail blocks = %d", len(tail.Blocks))
 	}
-	if fn, _ := tail.FragmentNumber(); fn != "tail-1" {
+	if fn, _ := tail.Tag(tagFragmentNumber); fn != "tail-1" {
 		t.Fatalf("tail FragmentNumber = %q", fn)
 	}
 }
@@ -275,9 +321,12 @@ func TestMultiSegment(t *testing.T) {
 	}
 	wantTS := []int64{1000000000, 1000000001, 1000000002, 1000000003}
 	for i, f := range frags {
-		ts, ok := f.ProducerTimestamp()
-		if !ok || ts.Unix() != wantTS[i] {
-			t.Fatalf("fragment %d ProducerTimestamp = %v ok=%v", i, ts, ok)
+		tsStr, ok := f.Tag(tagProducerTimestamp)
+		if !ok {
+			t.Fatalf("fragment %d ProducerTimestamp missing", i)
+		}
+		if ts := parseDecimalSeconds(t, tsStr); ts.Unix() != wantTS[i] {
+			t.Fatalf("fragment %d ProducerTimestamp = %v", i, ts)
 		}
 		if f.ClusterTimestamp != uint64(i)*1024 {
 			t.Fatalf("fragment %d ClusterTimestamp = %d", i, f.ClusterTimestamp)
@@ -317,7 +366,7 @@ func TestGap(t *testing.T) {
 	}
 	want := []string{"gap-0", "gap-1", "gap-4"}
 	for i, f := range frags {
-		fn, _ := f.FragmentNumber()
+		fn, _ := f.Tag(tagFragmentNumber)
 		if fn != want[i] {
 			t.Fatalf("fragment %d FragmentNumber = %q, want %q", i, fn, want[i])
 		}
@@ -343,7 +392,7 @@ func TestMultiCluster(t *testing.T) {
 	if !reflect.DeepEqual(frags[0].Tracks, frags[1].Tracks) {
 		t.Fatalf("clusters should share tracks")
 	}
-	if fn, _ := frags[0].FragmentNumber(); fn != "multi-cluster" {
+	if fn, _ := frags[0].Tag(tagFragmentNumber); fn != "multi-cluster" {
 		t.Fatalf("FragmentNumber = %q", fn)
 	}
 	// Distinct Cluster timestamps and blocks.

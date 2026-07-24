@@ -84,7 +84,7 @@ func TestKnownSizeChildOverflowIsSplitInvariant(t *testing.T) {
 			name = "one_byte"
 		}
 		t.Run(name, func(t *testing.T) {
-			p := New(WithKindClassifier(KVSKindForElementID))
+			p := New(WithKindClassifier(testKindClassifier))
 			var err error
 			if split {
 				for _, b := range data {

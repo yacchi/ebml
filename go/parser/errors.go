@@ -28,15 +28,15 @@ func (e TruncatedError) Unwrap() error {
 }
 
 type ElementOverflowError struct {
-	ChildID   uint32
+	ChildID   ElementID
 	ChildEnd  int64
-	ParentID  uint32
+	ParentID  ElementID
 	ParentEnd int64
 }
 
 func (e ElementOverflowError) Error() string {
 	return fmt.Sprintf("element %s ends at offset %d beyond parent %s end offset %d",
-		FormatID(e.ChildID), e.ChildEnd, FormatID(e.ParentID), e.ParentEnd)
+		e.ChildID, e.ChildEnd, e.ParentID, e.ParentEnd)
 }
 
 func (e ElementOverflowError) Unwrap() error {

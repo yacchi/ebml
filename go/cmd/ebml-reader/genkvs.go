@@ -1,13 +1,3 @@
-// Command genkvs generates the synthetic KVS/Matroska fixture corpus:
-//
-//	fixtures/kvs/<name>.ebml.hex   commented hex, in the tiny.ebml.hex format
-//	golden/kvs/<name>.jsonl        cursor event log (via the KVS classifier)
-//	fixtures/kvs/README.json       manifest of cases + structural facts
-//
-// All fixtures are 100% synthetic (see package kvsgen). Run from the go/ dir:
-//
-//	go run ./cmd/genkvs            # writes into ../fixtures/kvs and ../golden/kvs
-//	go run ./cmd/genkvs -root .    # custom repo root
 package main
 
 import (
@@ -15,30 +5,39 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/yacchi/ebml-reader/internal/ebmltrace"
 	"github.com/yacchi/ebml-reader/internal/kvsgen"
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml-reader/matroska"
 )
 
-func main() {
-	root := flag.String("root", "..", "repository root (parent of fixtures/ and golden/)")
-	flag.Parse()
-
-	fixturesDir := filepath.Join(*root, "fixtures", "kvs")
-	goldenDir := filepath.Join(*root, "golden", "kvs")
+// generateKVS writes the synthetic KVS fixture corpus under root:
+//
+//	fixtures/kvs/<name>.ebml.hex   commented hex, in the tiny.ebml.hex format
+//	golden/kvs/<name>.jsonl        cursor event log (via the Matroska classifier)
+//	fixtures/kvs/README.json       manifest of cases + structural facts
+//
+// All fixtures are 100% synthetic (see package kvsgen). Progress is written to
+// log (nil discards it).
+func generateKVS(root string, log io.Writer) error {
+	if log == nil {
+		log = io.Discard
+	}
+	fixturesDir := filepath.Join(root, "fixtures", "kvs")
+	goldenDir := filepath.Join(root, "golden", "kvs")
 	for _, d := range []string{fixturesDir, goldenDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
-			fail("mkdir %s: %v", d, err)
+			return fmt.Errorf("mkdir %s: %w", d, err)
 		}
 	}
 
 	fixtures := kvsgen.BuildAll()
 	manifest := map[string]any{
-		"generated_by": "go run ./cmd/genkvs",
+		"generated_by": "go run ./cmd/ebml-reader genkvs",
 		"data_safety":  "100% synthetic: fake UUID ContactId/InstanceId, counter-pattern PCM, synthetic tokens. No real Amazon Connect capture data.",
 		"schema":       "each .ebml.hex is a synthetic MKV stream; each golden/kvs/<name>.jsonl is the cursor event log (KVS classifier) and is split-invariant.",
 		"fixtures":     map[string]kvsgen.Facts{},
@@ -50,35 +49,36 @@ func main() {
 
 		hexPath := filepath.Join(fixturesDir, f.Name+".ebml.hex")
 		if err := os.WriteFile(hexPath, []byte(renderHex(f)), 0o644); err != nil {
-			fail("write %s: %v", hexPath, err)
+			return fmt.Errorf("write %s: %w", hexPath, err)
 		}
 
-		events, _, err := ebmltrace.Trace(ebmltrace.Whole(f.Data), parser.KVSKindForElementID)
+		events, _, err := ebmltrace.Trace(ebmltrace.Whole(f.Data), matroska.KindForElementID)
 		if err != nil {
-			fail("trace %s: %v", f.Name, err)
+			return fmt.Errorf("trace %s: %w", f.Name, err)
 		}
 		jsonl, err := ebmltrace.MarshalJSONL(events)
 		if err != nil {
-			fail("marshal golden %s: %v", f.Name, err)
+			return fmt.Errorf("marshal golden %s: %w", f.Name, err)
 		}
 		goldenPath := filepath.Join(goldenDir, f.Name+".jsonl")
 		if err := os.WriteFile(goldenPath, append(jsonl, '\n'), 0o644); err != nil {
-			fail("write %s: %v", goldenPath, err)
+			return fmt.Errorf("write %s: %w", goldenPath, err)
 		}
 
 		facts[f.Name] = f.Facts
-		fmt.Printf("generated %-28s %5d bytes, %3d events\n", f.Name, len(f.Data), len(events))
+		fmt.Fprintf(log, "generated %-28s %5d bytes, %3d events\n", f.Name, len(f.Data), len(events))
 	}
 
 	mb, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
-		fail("marshal manifest: %v", err)
+		return fmt.Errorf("marshal manifest: %w", err)
 	}
 	manifestPath := filepath.Join(fixturesDir, "README.json")
 	if err := os.WriteFile(manifestPath, append(mb, '\n'), 0o644); err != nil {
-		fail("write manifest: %v", err)
+		return fmt.Errorf("write manifest: %w", err)
 	}
-	fmt.Printf("wrote manifest %s\n", manifestPath)
+	fmt.Fprintf(log, "wrote manifest %s\n", manifestPath)
+	return nil
 }
 
 // renderHex emits the commented-hex fixture format: "# " comment lines then hex
@@ -103,7 +103,21 @@ func renderHex(f kvsgen.Fixture) string {
 	return b.String()
 }
 
-func fail(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "genkvs: "+format+"\n", args...)
-	os.Exit(1)
+func genkvsCommand(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("genkvs", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", "..", "repository root (parent of fixtures/ and golden/)")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "Usage: ebml-reader genkvs [flags]")
+		fmt.Fprintln(stderr, "  Regenerate fixtures/kvs, golden/kvs and README.json. Run from the go/ directory.")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if err := generateKVS(*root, stdout); err != nil {
+		fmt.Fprintf(stderr, "ebml-reader: %v\n", err)
+		return 1
+	}
+	return 0
 }

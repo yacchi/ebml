@@ -227,6 +227,6 @@
       "notes": "Cluster closes via end_master; Segment closes only at EOF."
     }
   },
-  "generated_by": "go run ./cmd/genkvs",
+  "generated_by": "go run ./cmd/ebml-reader genkvs",
   "schema": "each .ebml.hex is a synthetic MKV stream; each golden/kvs/\u003cname\u003e.jsonl is the cursor event log (KVS classifier) and is split-invariant."
 }

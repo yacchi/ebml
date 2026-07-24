@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"math/rand"
 
+	"github.com/yacchi/ebml-reader/matroska"
 	"github.com/yacchi/ebml-reader/parser"
 )
 
@@ -38,7 +39,7 @@ type Event struct {
 // frame mirrors the parser's master stack so Trace knows whether the current
 // top master is unknown-size (only unknown-size masters get boundary-closed).
 type frame struct {
-	id      uint32
+	id      parser.ElementID
 	unknown bool
 }
 
@@ -95,7 +96,8 @@ func Trace(chunks [][]byte, classifier parser.KindClassifier) ([]Event, int, err
 
 			// Unknown-size master (KVS Segment) boundary: a new top-level element
 			// begins the next fragment. Close the open Segment explicitly.
-			if len(mstack) > 0 && mstack[len(mstack)-1].unknown && parser.IsTopLevelElementID(h.ID) {
+			if len(mstack) > 0 && mstack[len(mstack)-1].unknown &&
+				(h.ID == matroska.IDEBML || h.ID == matroska.IDSegment) {
 				step++
 				events = append(events, Event{Step: step, Op: "leave", Offset: p.Offset(), Depth: p.Depth()})
 				if err := p.CloseMaster(); err != nil {

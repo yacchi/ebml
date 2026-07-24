@@ -29,6 +29,14 @@ the EBML magic (`1A 45 DF A3`) to find fragment boundaries — a fragile
 heuristic, since that 4-byte sequence can occur inside SimpleBlock PCM.
 `ebml-reader` drives the parse structurally instead.
 
+## Packages
+
+| Package | Purpose |
+| --- | --- |
+| `parser` | Incremental streaming cursor, VINT handling, leaf decode helpers, and `SimpleBlock` parsing |
+| `matroska` | Standard Matroska element registry and generic master/leaf classifier |
+| `fragment` | Generic per-`Cluster` assembly with decoded tracks, tags, timestamps, and blocks |
+
 ## Install
 
 ```bash
@@ -105,11 +113,30 @@ EOF to close the trailing unknown-size Segment and surface any structural
 error. The whole pipeline is **split-invariant** — the sequence of Fragments
 is identical regardless of how the input bytes are chunked.
 
-`Fragment` exposes `Tag`/`FragmentNumber`/`ContinuationToken`/
-`ProducerTimestamp` for the well-known KVS tags, `Tracks` for decoded
-`TrackEntry`s (`Number`/`Type`/`CodecID`), `ClusterTimestamp`, and `Blocks`
+`Fragment` exposes a generic `Tag(name)` accessor and the `Tags` field mapping
+tag names to values — callers read AWS metadata such as
+`AWS_KINESISVIDEO_FRAGMENT_NUMBER` or `AWS_KINESISVIDEO_PRODUCER_TIMESTAMP`
+themselves through it — `Tracks` for decoded `TrackEntry`s
+(`Number`/`Type`/`CodecID`), `ClusterTimestamp`, and `Blocks`
 (`[]*parser.SimpleBlock`) plus a `TrackPCM(trackNumber)` helper that
 concatenates a track's frame bytes across all blocks in the Cluster.
+
+## KVS GetMedia context
+
+Parsing KVS GetMedia output is otherwise officially supported by AWS only through
+the Java `amazon-kinesis-video-streams-parser-library`. This library provides the
+equivalent capability in Go: streaming, per-fragment, low-latency assembly with no
+KVS-specific API. AWS metadata remains ordinary Matroska `SimpleTag` data, so read
+it through the generic accessor:
+
+```go
+fragmentNumber, _ := f.Tag("AWS_KINESISVIDEO_FRAGMENT_NUMBER")
+contactID, _ := f.Tag("ContactId")
+```
+
+See the runnable end-to-end example in
+[`go/examples/kvs-getmedia`](go/examples/kvs-getmedia), which also demonstrates
+producer timestamp parsing and per-track PCM reporting.
 
 ## Lower-level API: `parser` package
 
@@ -122,11 +149,18 @@ For callers that need the raw cursor instead of fragment assembly, the
   split-invariant regardless of how the input is chunked. `ReadPayload`
   returns a leaf element's full bytes; `SkipPayload` advances past it without
   copying.
+- **Element IDs**: `parser.ElementID` is the wire VINT value *including* its
+  length-marker bits (so `SimpleBlock` is `0xA3` and `Cluster` is
+  `0x1F43B675`). Its `String()` method prints that conventional hex form. The
+  `parser` package carries no element table of its own; names and value types
+  live in `go/matroska`.
 - **Classification**: `WithKindClassifier` selects how element IDs map to
-  master/leaf kinds. `KVSKindForElementID` (in `go/parser/kvs_elements.go`)
-  classifies the KVS/Matroska element set — `Segment`/`Cluster`/`Tags`/
-  `Tracks`/`TrackEntry`/`SimpleBlock`/... — as master vs leaf correctly.
-  Without a classifier, unknown IDs default to a binary leaf, so e.g. a
+  master/leaf kinds — any `func(parser.ElementID) parser.Kind` will do.
+  `matroska.KindForElementID` (in the `go/matroska` registry package)
+  classifies the standard Matroska element set —
+  `Segment`/`Cluster`/`Tags`/`Tracks`/`TrackEntry`/`SimpleBlock`/... — as
+  master vs leaf correctly. Without it, only the EBML header and `Segment` are
+  treated as masters and every other ID defaults to a binary leaf, so e.g. a
   `Cluster` would be read as one opaque blob instead of entered.
 - **Decode helpers**: `DecodeUint`, `DecodeInt`, `DecodeFloat`, `DecodeString`
   turn a leaf's raw payload bytes into Go values, and `ParseSimpleBlock`
@@ -134,7 +168,7 @@ For callers that need the raw cursor instead of fragment assembly, the
   flags, lacing) into a `*parser.SimpleBlock` with per-frame `[][]byte`.
 
 ```go
-p := parser.New(parser.WithKindClassifier(parser.KVSKindForElementID))
+p := parser.New(parser.WithKindClassifier(matroska.KindForElementID))
 
 for _, chunk := range chunks { // e.g. one byte at a time
 	p.Feed(chunk)
@@ -165,13 +199,45 @@ for _, chunk := range chunks { // e.g. one byte at a time
 _, _ = p.FinalizeEOF()
 ```
 
+### Matroska registry API
+
+The `matroska` package is the single source of truth for standard element
+metadata. `Lookup` finds an element by its typed `parser.ElementID`;
+`NameForID` and `Describe` return its registered name or a readable hex ID;
+`IDForName` performs the exact-name reverse lookup; `Elements` returns the
+complete sorted registry; and `TypeFor` returns its `ValueType`. Call
+`ValueType.String()` for labels such as `master`, `uint`, `string`, `binary`,
+and `block`. The package also exposes `ID<Name>` constants for every registered
+element, including `matroska.IDSegmentUUID`, plus `KindForElementID` for parser
+classification.
+
+Names follow **RFC 9559**, which supersedes the older matroska.org spelling of
+several elements (`SegmentUUID`, not `SegmentUID`; `FileMediaType`, not
+`FileMimeType`; `Timestamp`/`TimestampScale`, not `Timecode`/`TimecodeScale`).
+`IDForName` still accepts those well-known pre-RFC names as aliases, but the
+canonical RFC name is the only one `Elements`, `Lookup`, `NameForID`, and
+`Describe` ever return. `SimpleBlock` and `Block` are registered as
+`TypeBlock`: the RFC types them as binary, and `TypeBlock` is this library's
+refinement marking the binary payloads it can decode with
+`parser.ParseSimpleBlock`.
+
 ## Repo layout
 
-- `go/parser/` — the streaming cursor, VINT parsing, element ID tables and
-  classifiers, decode helpers, `SimpleBlock` parsing.
+- `go/parser/` — the streaming cursor, VINT parsing, decode helpers,
+  `SimpleBlock` parsing.
+- `go/matroska/` — the standard Matroska element registry (`Lookup`,
+  `NameForID`, `Describe`, `IDForName`, `Elements`, `TypeFor`, `ValueType`),
+  the `ID<Name>` constants (one for every registered element, such as
+  `matroska.IDSegmentUUID`), and the `KindForElementID` classifier passed to
+  `parser` (the single source of truth for element IDs, names, value types, and
+  kinds, used by `fragment`, the CLI, and the fixture generator).
 - `go/fragment/` — the per-fragment assembly layer built on top of `parser`.
-- `go/internal/kvsgen/` + `go/cmd/genkvs/` — the synthetic KVS fixture
-  generator.
+- `go/examples/kvs-getmedia/` — runnable example reading a KVS GetMedia byte
+  stream and printing per-fragment AWS metadata, tracks, and PCM byte counts.
+- `go/internal/kvsgen/` — the synthetic KVS fixture generator, driven by the
+  `genkvs` subcommand of `go/cmd/ebml-reader/`.
+- `go/cmd/ebml-reader/` — the `ebml-reader` CLI: `dump` (indented element
+  tree), `xml` (well-formed XML), and `genkvs` (regenerate the fixture corpus).
 - `fixtures/` — commented hex fixtures (`*.ebml.hex`): `#` lines describe the
   layout, the body is whitespace-separated hex bytes. Every fixture is 100%
   synthetic (fake UUIDs, counter/tone PCM, synthetic tokens) — this repo never
@@ -186,14 +252,32 @@ _, _ = p.FinalizeEOF()
   input stream.
 - `spec/SPEC.md` — the cursor's behavioral spec.
 
-## Build / test
+## CLI
+
+Run from the `go/` directory:
+
+```bash
+go run ./cmd/ebml-reader dump --hex ../fixtures/kvs/topology_basic.ebml.hex
+go run ./cmd/ebml-reader xml --hex ../fixtures/kvs/topology_basic.ebml.hex
+go run ./cmd/ebml-reader genkvs
+```
+
+The `dump` command prints an indented element tree. For example:
+
+```text
+Segment (0x18538067) [offset 0, size unknown]
+  Info (0x1549A966) [offset 12, size 29]
+    SegmentUUID (0x73A4) [type binary, offset 17, size 16] = binary 16 bytes: ...
+```
+
+## Build / test / regenerate
 
 Run from the `go/` directory:
 
 ```bash
 go test ./...        # fixtures + all KVS fixtures across every split pattern
 go vet ./...
-go run ./cmd/genkvs   # regenerate fixtures/kvs/*.ebml.hex + golden/kvs/*.jsonl
+go run ./cmd/ebml-reader genkvs   # regenerate fixtures/kvs/*.ebml.hex + golden/kvs/*.jsonl
 ```
 
 A fuzz target (`FuzzParser` in `go/parser/fuzz_test.go`) seeds from the

@@ -48,7 +48,7 @@ func loadFuzzHex(path string) ([]byte, error) {
 }
 
 func driveParser(data []byte, byteByByte bool) {
-	p := New(WithKindClassifier(KVSKindForElementID))
+	p := New(WithKindClassifier(testKindClassifier))
 	drain := func() {
 		for {
 			if p.current != nil {
@@ -137,7 +137,7 @@ func TestVINTLengthLimits(t *testing.T) {
 // as a caller relying on errors.Is would observe it.
 func TestHostileSizeVINTViaPeek(t *testing.T) {
 	data := []byte{0xa3, 0x00, 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
-	p := New(WithKindClassifier(KVSKindForElementID))
+	p := New(WithKindClassifier(testKindClassifier))
 	p.Feed(data)
 
 	_, err := p.Peek()
@@ -150,22 +150,5 @@ func TestHostileSizeVINTViaPeek(t *testing.T) {
 	}
 	if sizeErr.What != "element size" {
 		t.Fatalf("Peek() error What = %q, want %q", sizeErr.What, "element size")
-	}
-}
-
-func TestKVSSpecialBinaryLeaves(t *testing.T) {
-	for _, tt := range []struct {
-		id   uint32
-		name string
-	}{
-		{ElementIDCRC32, "CRC-32"},
-		{ElementIDVoid, "Void"},
-	} {
-		if got := KVSNameForElementID(tt.id); got != tt.name {
-			t.Errorf("KVSNameForElementID(%#x) = %q, want %q", tt.id, got, tt.name)
-		}
-		if got := KVSKindForElementID(tt.id); got != KindBinary {
-			t.Errorf("KVSKindForElementID(%#x) = %q, want %q", tt.id, got, KindBinary)
-		}
 	}
 }

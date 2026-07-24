@@ -1,4 +1,4 @@
-package parser_test
+package matroska_test
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/yacchi/ebml-reader/internal/ebmltrace"
 	"github.com/yacchi/ebml-reader/internal/kvsgen"
+	"github.com/yacchi/ebml-reader/matroska"
 	"github.com/yacchi/ebml-reader/parser"
 )
 
@@ -79,7 +80,7 @@ func TestKVSFixturesAreSplitInvariant(t *testing.T) {
 			}
 
 			for _, sp := range splits {
-				events, needMore, err := ebmltrace.Trace(sp.chunks, parser.KVSKindForElementID)
+				events, needMore, err := ebmltrace.Trace(sp.chunks, matroska.KindForElementID)
 				if err != nil {
 					t.Fatalf("[%s] trace: %v", sp.name, err)
 				}
@@ -115,7 +116,7 @@ func TestFalseEBMLMagicInPCMIsNotMisSplit(t *testing.T) {
 		t.Fatalf("fixture must contain the EBML magic at least twice (header + embedded in PCM)")
 	}
 
-	events, _, err := ebmltrace.Trace(ebmltrace.SplitFibonacci(raw), parser.KVSKindForElementID)
+	events, _, err := ebmltrace.Trace(ebmltrace.SplitFibonacci(raw), matroska.KindForElementID)
 	if err != nil {
 		t.Fatalf("trace: %v", err)
 	}
@@ -127,9 +128,9 @@ func TestFalseEBMLMagicInPCMIsNotMisSplit(t *testing.T) {
 			continue
 		}
 		switch ev.ID {
-		case parser.FormatID(parser.ElementIDEBML):
+		case parser.FormatID(matroska.IDEBML):
 			ebmlPeeks++
-		case parser.FormatID(parser.ElementIDSimpleBlock):
+		case parser.FormatID(matroska.IDSimpleBlock):
 			if ev.Size != nil {
 				simpleBlockSizes = append(simpleBlockSizes, *ev.Size)
 			}

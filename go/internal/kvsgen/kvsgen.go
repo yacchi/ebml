@@ -2,7 +2,7 @@
 // reproduce the shape of Amazon Connect KVS GetMedia fragments, from scratch.
 //
 // DATA SAFETY: every value here is fabricated. ContactId/InstanceId are fake
-// RFC-4122-shaped UUIDs, PCM is a deterministic counter pattern, SegmentUIDs and
+// RFC-4122-shaped UUIDs, PCM is a deterministic counter pattern, SegmentUUIDs and
 // tokens are synthetic. Nothing is copied or derived from any real capture.
 //
 // Fragment shape (one per Segment):
@@ -21,6 +21,7 @@
 package kvsgen
 
 import (
+	"github.com/yacchi/ebml-reader/matroska"
 	"github.com/yacchi/ebml-reader/parser"
 )
 
@@ -38,7 +39,7 @@ const (
 
 // encodeID returns the element ID bytes (big-endian, leading zero bytes trimmed);
 // the ID value already carries its EBML length-marker bits.
-func encodeID(id uint32) []byte {
+func encodeID(id parser.ElementID) []byte {
 	b := []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}
 	start := 0
 	for start < 3 && b[start] == 0 {
@@ -87,13 +88,13 @@ func encodeUint(v uint64) []byte {
 	return out
 }
 
-func elem(id uint32, payload []byte) []byte {
+func elem(id parser.ElementID, payload []byte) []byte {
 	out := encodeID(id)
 	out = append(out, encodeSize(uint64(len(payload)))...)
 	return append(out, payload...)
 }
 
-func elemUnknown(id uint32, payload []byte) []byte {
+func elemUnknown(id parser.ElementID, payload []byte) []byte {
 	out := encodeID(id)
 	out = append(out, unknownSize()...)
 	return append(out, payload...)
@@ -130,31 +131,31 @@ func pcmWithEBMLMagic(n int) []byte {
 // ---- Matroska element builders ----
 
 func simpleTag(name, value string) []byte {
-	return elem(parser.ElementIDSimpleTag, concat(
-		elem(parser.ElementIDTagName, []byte(name)),
-		elem(parser.ElementIDTagString, []byte(value)),
+	return elem(matroska.IDSimpleTag, concat(
+		elem(matroska.IDTagName, []byte(name)),
+		elem(matroska.IDTagString, []byte(value)),
 	))
 }
 
 func ebmlHeader() []byte {
-	return elem(parser.ElementIDEBML, concat(
-		elem(parser.ElementIDEBMLVersion, encodeUint(1)),
-		elem(parser.ElementIDEBMLReadVer, encodeUint(1)),
-		elem(parser.ElementIDDocType, []byte("matroska")),
+	return elem(matroska.IDEBML, concat(
+		elem(matroska.IDEBMLVersion, encodeUint(1)),
+		elem(matroska.IDEBMLReadVersion, encodeUint(1)),
+		elem(matroska.IDDocType, []byte("matroska")),
 	))
 }
 
 func infoElement() []byte {
-	return elem(parser.ElementIDInfo, elem(parser.ElementIDTimestampScale, encodeUint(1000000)))
+	return elem(matroska.IDInfo, elem(matroska.IDTimestampScale, encodeUint(1000000)))
 }
 
 func tracksElement() []byte {
-	trackEntry := elem(parser.ElementIDTrackEntry, concat(
-		elem(parser.ElementIDTrackNumber, encodeUint(1)),
-		elem(parser.ElementIDTrackType, encodeUint(2)), // 2 = audio
-		elem(parser.ElementIDCodecID, []byte(fakeCodecID)),
+	trackEntry := elem(matroska.IDTrackEntry, concat(
+		elem(matroska.IDTrackNumber, encodeUint(1)),
+		elem(matroska.IDTrackType, encodeUint(2)), // 2 = audio
+		elem(matroska.IDCodecID, []byte(fakeCodecID)),
 	))
-	return elem(parser.ElementIDTracks, trackEntry)
+	return elem(matroska.IDTracks, trackEntry)
 }
 
 // tagsElement builds a Tags element. If contactID is "" the ContactId SimpleTag
@@ -170,11 +171,11 @@ func tagsElement(producerTS, fragmentNumber, contactID string) []byte {
 	}
 	tags = append(tags, simpleTag("InstanceId", fakeInstance)...)
 
-	tag := elem(parser.ElementIDTag, concat(
-		elem(parser.ElementIDTargets, nil), // empty Targets master
+	tag := elem(matroska.IDTag, concat(
+		elem(matroska.IDTargets, nil), // empty Targets master
 		tags,
 	))
-	return elem(parser.ElementIDTags, tag)
+	return elem(matroska.IDTags, tag)
 }
 
 // simpleBlock builds a SimpleBlock leaf: track VINT (=1), int16 BE relative
@@ -184,16 +185,16 @@ func simpleBlock(timecode int16, audio []byte) []byte {
 	content = append(content, byte(uint16(timecode)>>8), byte(uint16(timecode)))
 	content = append(content, 0x00) // flags
 	content = append(content, audio...)
-	return elem(parser.ElementIDSimpleBlock, content)
+	return elem(matroska.IDSimpleBlock, content)
 }
 
 // clusterElement builds a KNOWN-size Cluster with a Timestamp and blocks.
 func clusterElement(clusterTS uint64, blocks ...[]byte) []byte {
-	payload := elem(parser.ElementIDTimestamp, encodeUint(clusterTS))
+	payload := elem(matroska.IDTimestamp, encodeUint(clusterTS))
 	for _, b := range blocks {
 		payload = append(payload, b...)
 	}
-	return elem(parser.ElementIDCluster, payload)
+	return elem(matroska.IDCluster, payload)
 }
 
 // ---- Fragment builder ----
@@ -219,5 +220,5 @@ func fragment(o fragOpts) []byte {
 		seg = append(seg, tagsElement(o.producerTS, o.fragmentNumber, o.contactID)...)
 	}
 	seg = append(seg, clusterElement(o.clusterTS, o.blocks...)...)
-	return concat(ebmlHeader(), elemUnknown(parser.ElementIDSegment, seg))
+	return concat(ebmlHeader(), elemUnknown(matroska.IDSegment, seg))
 }

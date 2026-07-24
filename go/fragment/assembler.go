@@ -1,11 +1,12 @@
 package fragment
 
 import (
+	"github.com/yacchi/ebml-reader/matroska"
 	"github.com/yacchi/ebml-reader/parser"
 )
 
-// Assembler drives the streaming EBML cursor over a KVS GetMedia byte stream and
-// assembles one Fragment per completed Cluster.
+// Assembler drives the streaming EBML cursor over a continuous Matroska byte
+// stream and assembles one Fragment per completed Cluster.
 //
 // Usage is push-based: feed arbitrary []byte chunks with Feed, which returns any
 // Fragments that completed within that chunk, then call Finalize once at EOF to
@@ -35,12 +36,19 @@ type Assembler struct {
 }
 
 type mframe struct {
-	id      uint32
-	unknown bool // unknown-size master (a KVS Segment); closed at a top-level boundary or EOF
+	id      parser.ElementID
+	unknown bool // unknown-size master (e.g. a Segment); closed at a top-level boundary or EOF
+}
+
+// isTopLevelElementID reports whether id begins a new top-level document part
+// (an EBML header or a Segment), which structurally closes any open
+// unknown-size Segment.
+func isTopLevelElementID(id parser.ElementID) bool {
+	return id == matroska.IDEBML || id == matroska.IDSegment
 }
 
 type pendingLeaf struct {
-	id uint32
+	id parser.ElementID
 }
 
 type clusterAccum struct {
@@ -48,12 +56,12 @@ type clusterAccum struct {
 	blocks    []*parser.SimpleBlock
 }
 
-// New returns an Assembler configured with the KVS/Matroska element classifier
-// so Segment/Cluster/Tracks/Tags/TrackEntry/SimpleTag classify as masters and
+// New returns an Assembler configured with the Matroska element classifier so
+// Segment/Cluster/Tracks/Tags/TrackEntry/SimpleTag classify as masters and
 // their leaves decode correctly.
 func New() *Assembler {
 	return &Assembler{
-		p: parser.New(parser.WithKindClassifier(parser.KVSKindForElementID)),
+		p: parser.New(parser.WithKindClassifier(matroska.KindForElementID)),
 	}
 }
 
@@ -141,7 +149,7 @@ func (a *Assembler) drain() error {
 		// element (EBML header or Segment) begins the following fragment. This is
 		// driven by element structure via CloseMaster, never by scanning bytes for
 		// the EBML magic, so PCM containing the magic cannot cause a spurious split.
-		if len(a.mstack) > 0 && a.mstack[len(a.mstack)-1].unknown && parser.IsTopLevelElementID(h.ID) {
+		if len(a.mstack) > 0 && a.mstack[len(a.mstack)-1].unknown && isTopLevelElementID(h.ID) {
 			id := a.mstack[len(a.mstack)-1].id
 			if err := a.p.CloseMaster(); err != nil {
 				return err
@@ -170,65 +178,65 @@ func (a *Assembler) drain() error {
 
 // parentID returns the ID of the master currently on top of the stack (the
 // parent of the element being processed), or 0 when at the top level.
-func (a *Assembler) parentID() uint32 {
+func (a *Assembler) parentID() parser.ElementID {
 	if len(a.mstack) == 0 {
 		return 0
 	}
 	return a.mstack[len(a.mstack)-1].id
 }
 
-func (a *Assembler) onEnterMaster(id uint32) {
+func (a *Assembler) onEnterMaster(id parser.ElementID) {
 	switch id {
-	case parser.ElementIDSegment:
+	case matroska.IDSegment:
 		// New fragment boundary: nothing from the previous Segment may leak in.
 		a.segTags = make(map[string]string)
 		a.segTracks = nil
 		a.curCluster = nil
-	case parser.ElementIDTrackEntry:
+	case matroska.IDTrackEntry:
 		a.segTracks = append(a.segTracks, Track{})
-	case parser.ElementIDSimpleTag:
+	case matroska.IDSimpleTag:
 		a.curTagName = ""
 		a.curTagValue = ""
-	case parser.ElementIDCluster:
+	case matroska.IDCluster:
 		a.curCluster = &clusterAccum{}
 	}
 }
 
-func (a *Assembler) onCloseMaster(id uint32) error {
+func (a *Assembler) onCloseMaster(id parser.ElementID) error {
 	switch id {
-	case parser.ElementIDSimpleTag:
+	case matroska.IDSimpleTag:
 		if a.curTagName != "" && a.segTags != nil {
 			a.segTags[a.curTagName] = a.curTagValue
 		}
-	case parser.ElementIDCluster:
+	case matroska.IDCluster:
 		a.emitFragment()
 		a.curCluster = nil
 	}
 	return nil
 }
 
-func (a *Assembler) onLeaf(id uint32, payload []byte) error {
+func (a *Assembler) onLeaf(id parser.ElementID, payload []byte) error {
 	parent := a.parentID()
 	switch {
-	case id == parser.ElementIDTrackNumber && parent == parser.ElementIDTrackEntry:
+	case id == matroska.IDTrackNumber && parent == matroska.IDTrackEntry:
 		v, err := parser.DecodeUint(payload)
 		if err != nil {
 			return err
 		}
 		a.lastTrack().Number = v
-	case id == parser.ElementIDTrackType && parent == parser.ElementIDTrackEntry:
+	case id == matroska.IDTrackType && parent == matroska.IDTrackEntry:
 		v, err := parser.DecodeUint(payload)
 		if err != nil {
 			return err
 		}
 		a.lastTrack().Type = v
-	case id == parser.ElementIDCodecID && parent == parser.ElementIDTrackEntry:
+	case id == matroska.IDCodecID && parent == matroska.IDTrackEntry:
 		a.lastTrack().CodecID = parser.DecodeString(payload)
-	case id == parser.ElementIDTagName && parent == parser.ElementIDSimpleTag:
+	case id == matroska.IDTagName && parent == matroska.IDSimpleTag:
 		a.curTagName = parser.DecodeString(payload)
-	case id == parser.ElementIDTagString && parent == parser.ElementIDSimpleTag:
+	case id == matroska.IDTagString && parent == matroska.IDSimpleTag:
 		a.curTagValue = parser.DecodeString(payload)
-	case id == parser.ElementIDTimestamp && parent == parser.ElementIDCluster:
+	case id == matroska.IDTimestamp && parent == matroska.IDCluster:
 		if a.curCluster != nil {
 			v, err := parser.DecodeUint(payload)
 			if err != nil {
@@ -236,7 +244,7 @@ func (a *Assembler) onLeaf(id uint32, payload []byte) error {
 			}
 			a.curCluster.timestamp = v
 		}
-	case id == parser.ElementIDSimpleBlock && parent == parser.ElementIDCluster:
+	case id == matroska.IDSimpleBlock && parent == matroska.IDCluster:
 		if a.curCluster != nil {
 			block, err := parser.ParseSimpleBlock(payload)
 			if err != nil {

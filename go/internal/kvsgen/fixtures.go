@@ -3,7 +3,7 @@ package kvsgen
 import (
 	"fmt"
 
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml-reader/matroska"
 )
 
 // Facts records structural expectations for a fixture, for the manifest
@@ -50,7 +50,7 @@ func BuildAll() []Fixture {
 func multiCluster() Fixture {
 	data := concat(
 		ebmlHeader(),
-		elemUnknown(parser.ElementIDSegment, concat(
+		elemUnknown(matroska.IDSegment, concat(
 			tracksElement(),
 			tagsElement("1500000000.000", "multi-cluster", fakeContactA),
 			clusterElement(0,
