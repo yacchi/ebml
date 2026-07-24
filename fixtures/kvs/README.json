@@ -1,0 +1,232 @@
+{
+  "data_safety": "100% synthetic: fake UUID ContactId/InstanceId, counter-pattern PCM, synthetic tokens. No real Amazon Connect capture data.",
+  "fixtures": {
+    "false_ebml_magic_in_pcm": {
+      "description": "SimpleBlock PCM embeds the EBML magic; must not mis-split.",
+      "fragments": 1,
+      "segments": 1,
+      "clusters": 1,
+      "simple_blocks": 3,
+      "ebml_headers": 1,
+      "unknown_size_segment": true,
+      "known_size_cluster": true,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "producer_timestamps": [
+        "6000000000.000"
+      ],
+      "fragment_numbers": [
+        "magic-0"
+      ],
+      "bytes": 534,
+      "notes": "Proves size-driven parsing beats the byte-scan heuristic."
+    },
+    "filter_mismatch": {
+      "description": "ContactId switches A-\u003eB at fragment 2.",
+      "fragments": 4,
+      "segments": 4,
+      "clusters": 4,
+      "simple_blocks": 4,
+      "ebml_headers": 4,
+      "unknown_size_segment": true,
+      "known_size_cluster": true,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000002",
+        "00000000-0000-4000-8000-000000000002"
+      ],
+      "producer_timestamps": [
+        "4000000000.000",
+        "4000000001.024",
+        "4000000002.048",
+        "4000000003.072"
+      ],
+      "fragment_numbers": [
+        "fm-0",
+        "fm-1",
+        "fm-2",
+        "fm-3"
+      ],
+      "bytes": 1755,
+      "notes": "Contact boundary is reader policy; structure is uniform."
+    },
+    "gap": {
+      "description": "Non-contiguous fragments (dropped 2 and 3).",
+      "fragments": 3,
+      "segments": 3,
+      "clusters": 3,
+      "simple_blocks": 3,
+      "ebml_headers": 3,
+      "unknown_size_segment": true,
+      "known_size_cluster": true,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "producer_timestamps": [
+        "5000000000.000",
+        "5000000001.024",
+        "5000000004.096"
+      ],
+      "fragment_numbers": [
+        "gap-0",
+        "gap-1",
+        "gap-4"
+      ],
+      "bytes": 1322,
+      "notes": "Discontinuity visible in tags/timecodes, not in structure."
+    },
+    "multi_cluster": {
+      "description": "One unknown-size Segment containing two known-size Clusters.",
+      "fragments": 1,
+      "segments": 1,
+      "clusters": 2,
+      "simple_blocks": 4,
+      "ebml_headers": 1,
+      "unknown_size_segment": true,
+      "known_size_cluster": true,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "producer_timestamps": [
+        "1500000000.000"
+      ],
+      "fragment_numbers": [
+        "multi-cluster"
+      ],
+      "bytes": 543,
+      "notes": "Both Clusters close structurally before the Segment closes at EOF."
+    },
+    "multi_segment": {
+      "description": "4-fragment continuous stream; per-fragment unknown-size Segments.",
+      "fragments": 4,
+      "segments": 4,
+      "clusters": 4,
+      "simple_blocks": 8,
+      "ebml_headers": 4,
+      "unknown_size_segment": true,
+      "known_size_cluster": true,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "producer_timestamps": [
+        "1000000000.000",
+        "1000000001.024",
+        "1000000002.048",
+        "1000000003.072"
+      ],
+      "fragment_numbers": [
+        "...001",
+        "...002",
+        "...003",
+        "...004"
+      ],
+      "bytes": 2111,
+      "notes": "Segment boundaries detected via top-level EBML sibling, not magic scan."
+    },
+    "tagless_consecutive": {
+      "description": "4 fragments; two consecutive middle fragments are tagless.",
+      "fragments": 4,
+      "segments": 4,
+      "clusters": 4,
+      "simple_blocks": 4,
+      "ebml_headers": 4,
+      "unknown_size_segment": true,
+      "known_size_cluster": true,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001",
+        "",
+        "",
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "producer_timestamps": [
+        "3000000000.000",
+        "3000000001.024",
+        "3000000002.048",
+        "3000000003.072"
+      ],
+      "fragment_numbers": [
+        "c-0",
+        "c-1",
+        "c-2",
+        "c-3"
+      ],
+      "bytes": 1087,
+      "notes": "Two consecutive tagless fragments; cursor parses cleanly."
+    },
+    "tagless_single": {
+      "description": "3 fragments; middle fragment has no Tags element.",
+      "fragments": 3,
+      "segments": 3,
+      "clusters": 3,
+      "simple_blocks": 3,
+      "ebml_headers": 3,
+      "unknown_size_segment": true,
+      "known_size_cluster": true,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001",
+        "",
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "producer_timestamps": [
+        "2000000000.000",
+        "2000000001.024",
+        "2000000002.048"
+      ],
+      "fragment_numbers": [
+        "tag-0",
+        "tag-1",
+        "tag-2"
+      ],
+      "bytes": 988,
+      "notes": "Middle fragment tagless; cursor still parses cleanly."
+    },
+    "tail_last_fragment": {
+      "description": "Final fragment's Cluster observable before EOF; Segment closes at EOF.",
+      "fragments": 2,
+      "segments": 2,
+      "clusters": 2,
+      "simple_blocks": 3,
+      "ebml_headers": 2,
+      "unknown_size_segment": true,
+      "known_size_cluster": true,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "producer_timestamps": [
+        "7000000000.000",
+        "7000000001.024"
+      ],
+      "fragment_numbers": [
+        "tail-0",
+        "tail-1"
+      ],
+      "bytes": 917,
+      "notes": "Last Cluster emits via end_master; tail latency removed."
+    },
+    "topology_basic": {
+      "description": "Single fragment: unknown-size Segment holding a known-size Cluster.",
+      "fragments": 1,
+      "segments": 1,
+      "clusters": 1,
+      "simple_blocks": 3,
+      "ebml_headers": 1,
+      "unknown_size_segment": true,
+      "known_size_cluster": true,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "producer_timestamps": [
+        "1000000000.000"
+      ],
+      "fragment_numbers": [
+        "91343852333181000000000000000000000000000000001"
+      ],
+      "bytes": 574,
+      "notes": "Cluster closes via end_master; Segment closes only at EOF."
+    }
+  },
+  "generated_by": "go run ./cmd/genkvs",
+  "schema": "each .ebml.hex is a synthetic MKV stream; each golden/kvs/\u003cname\u003e.jsonl is the cursor event log (KVS classifier) and is split-invariant."
+}

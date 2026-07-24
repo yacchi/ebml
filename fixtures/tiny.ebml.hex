@@ -1,0 +1,15 @@
+# A tiny EBML-like stream (hex).
+# Layout:
+# - EBML (master, known-size=15)
+#   - EBMLVersion (uint, size=1, value=1)
+#   - EBMLReadVersion (uint, size=1, value=1)
+#   - DocType (string/binary, size=4, value="webm")
+# - Segment (master, unknown-size)
+#   - Void (binary, size=1, value=0)
+1A45DFA3 8F
+  4286 81 01
+  42F7 81 01
+  4282 84 77 65 62 6D
+18538067 FF
+  EC 81 00
+

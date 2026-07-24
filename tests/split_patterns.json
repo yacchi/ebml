@@ -1,0 +1,8 @@
+{
+  "patterns": [
+    { "name": "one_byte", "type": "fixed", "chunk_size": 1 },
+    { "name": "fibonacci", "type": "fibonacci" },
+    { "name": "random", "type": "random", "seed": 12345, "max_chunk": 7 }
+  ]
+}
+

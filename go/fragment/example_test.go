@@ -1,0 +1,77 @@
+package fragment_test
+
+import (
+	"encoding/hex"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/yacchi/ebml-reader/fragment"
+)
+
+// Example_streamingAssembly shows the whole loop: construct an assembler, push
+// arbitrary byte chunks of a KVS GetMedia stream, receive completed *Fragment
+// values, and read metadata (ContactId) plus per-track PCM byte counts.
+//
+// It loads the committed topology_basic fixture and feeds it in fixed 64-byte
+// chunks to demonstrate that chunk boundaries do not matter.
+func Example_streamingAssembly() {
+	raw := loadFixtureBytes("topology_basic")
+
+	a := fragment.New()
+
+	var fragments []*fragment.Fragment
+	const chunk = 64
+	for i := 0; i < len(raw); i += chunk {
+		end := i + chunk
+		if end > len(raw) {
+			end = len(raw)
+		}
+		frags, err := a.Feed(raw[i:end])
+		if err != nil {
+			panic(err)
+		}
+		fragments = append(fragments, frags...)
+	}
+	tail, err := a.Finalize()
+	if err != nil {
+		panic(err)
+	}
+	fragments = append(fragments, tail...)
+
+	for _, f := range fragments {
+		contactID, _ := f.Tag("ContactId")
+		fmt.Printf("ContactId=%s\n", contactID)
+		for _, tr := range f.Tracks {
+			fmt.Printf("track %d: %d PCM bytes\n", tr.Number, len(f.TrackPCM(tr.Number)))
+		}
+	}
+	// Output:
+	// ContactId=00000000-0000-4000-8000-000000000001
+	// track 1: 96 PCM bytes
+}
+
+// loadFixtureBytes decodes a committed .ebml.hex fixture (comment lines removed).
+func loadFixtureBytes(name string) []byte {
+	path := filepath.Join("..", "..", "fixtures", "kvs", name+".ebml.hex")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	var sb strings.Builder
+	for _, ln := range strings.Split(string(b), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || strings.HasPrefix(ln, "#") {
+			continue
+		}
+		for _, tok := range strings.Fields(ln) {
+			sb.WriteString(tok)
+		}
+	}
+	raw, err := hex.DecodeString(sb.String())
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
