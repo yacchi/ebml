@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/yacchi/ebml/ext/stream"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
 )
@@ -43,7 +44,7 @@ func dumpDetails(n parser.Node, typ matroska.ValueType) string {
 // leaf prints one leaf element. It is where the cursor's lazy default earns its
 // keep: when nothing of the payload would be printed, the leaf is left untouched
 // and those bytes are never materialised at all.
-func (d dumper) leaf(s *stream, n *parser.LeafNode) error {
+func (d dumper) leaf(s *stream.Stream, n *parser.LeafNode) error {
 	typ, known := matroska.TypeFor(n.ID())
 	if d.maxBinary <= 0 && (!known || typ == matroska.TypeBinary || typ == matroska.TypeBlock) {
 		fmt.Fprintf(d.out, "%s = binary %s bytes\n", d.header(n), sizeText(n.Size()))
@@ -97,7 +98,7 @@ func runDump(in io.Reader, out io.Writer, opt dumpOptions) error {
 	if err != nil {
 		return err
 	}
-	s := newStream(src)
+	s := stream.New(src, matroska.KindForElementID, parser.WithBoundary(matroska.StreamBoundary))
 	d := dumper{out: out, maxBinary: opt.maxBinary}
 	for {
 		node, err := s.Next()

@@ -208,6 +208,45 @@ only on exported core APIs. A missing capability in an extension is a core
 capability bug, not a reason to reach into parser internals. No retention path
 uses a per-element allowlist.
 
+### `ext/stream`
+
+`stream.Stream` owns an `io.Reader` and answers `NeedMoreData`, so consumers
+above it see only nodes, `io.EOF`, or a real failure. It preserves the
+header-first property: skipping a master or leaf does not materialise its
+payload.
+
+```go
+package main
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+
+	"github.com/yacchi/ebml/ext/stream"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
+)
+
+func main() {
+	s := stream.New(bytes.NewReader(nil), matroska.KindForElementID)
+	for {
+		node, err := s.Next()
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(node.ID(), node.Kind(), node.Offset())
+		if leaf, ok := node.(*parser.LeafNode); ok {
+			_, _ = s.Payload(leaf)
+		}
+	}
+}
+```
+
 ### `ext/fragment`
 
 `fragment.New` assembles a continuous KVS GetMedia stream and emits one

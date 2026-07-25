@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/yacchi/ebml/ext/stream"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
 )
@@ -72,7 +73,7 @@ func (x *xmlEmitter) closeTop() {
 
 // leaf emits one leaf element. When no payload byte would be emitted the leaf keeps
 // the cursor's skipping default, so those bytes are never materialised.
-func (x *xmlEmitter) leaf(s *stream, n *parser.LeafNode) error {
+func (x *xmlEmitter) leaf(s *stream.Stream, n *parser.LeafNode) error {
 	typ, known := matroska.TypeFor(n.ID())
 	if x.maxBinary <= 0 && (!known || typ == matroska.TypeBinary || typ == matroska.TypeBlock) {
 		attrs := x.baseAttrs(n)
@@ -150,7 +151,7 @@ func runXML(in io.Reader, out io.Writer, opt xmlOptions) error {
 		return err
 	}
 
-	walkErr := x.walk(newStream(src))
+	walkErr := x.walk(stream.New(src, matroska.KindForElementID, parser.WithBoundary(matroska.StreamBoundary)))
 
 	// Always close every open element (including the root) so stdout is
 	// well-formed XML, even when the walk or the encoder failed mid-stream.
@@ -174,7 +175,7 @@ func runXML(in io.Reader, out io.Writer, opt xmlOptions) error {
 }
 
 // walk pulls every element of s and emits it.
-func (x *xmlEmitter) walk(s *stream) error {
+func (x *xmlEmitter) walk(s *stream.Stream) error {
 	for {
 		node, err := s.Next()
 		if err != nil {

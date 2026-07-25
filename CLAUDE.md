@@ -44,6 +44,10 @@ carries no meaning.
 * Iterator sugar (`Cursor.Nodes`) may exist but is NOT the normative shape: a range
   loop cannot distinguish need-more-data from end of input, and that distinction is
   this library's central semantic. Keep it explicit in `Next`.
+* The answer to `NeedMoreData` lives in exactly one place, `ext/stream`, because
+  only the holder of the input source can give it. A consumer that pushes bytes
+  itself still sees `NeedMoreData` from `parser.Cursor`; that low-level contract
+  stays unchanged.
 * `parser.Parser` stays exported as the low-level engine: `internal/ebmltrace` needs
   operation-level control to produce the golden traces, and the goldens are the
   conformance corpus.
@@ -200,6 +204,10 @@ The core is working and tested:
   `Fragment` per completed `Cluster` by pulling `Cursor.Next` in its own loop,
   using only exported core APIs, with `WithResync` and `WithSkipContentErrors`
   as its two opt-in, per-error-class recovery options.
+* `go/ext/stream` owns an `io.Reader` and answers `NeedMoreData` while driving a
+ cursor. The CLI's private stream driver is gone; `go/kvs.Reader` remains a
+ byte-oriented assembler driver because it consumes `Assembler.Feed`, not cursor
+ nodes.
 * `go/kvs` is a separate module holding all KVS-specific tag and metadata
   knowledge; the core module has no KVS element or tag knowledge left. The
   runnable example moved to `go/kvs/examples/getmedia`.
