@@ -190,6 +190,115 @@ func TestCheckReportsChildAbsentFromSchema(t *testing.T) {
 	}
 }
 
+// clusterSchema is the Cluster subtree the registry lists as complete, plus
+// whatever extra child a test wants to add to it.
+func clusterSchema(t *testing.T, extra string) *Schema {
+	t.Helper()
+	return schemaFor(t, `
+		<element name="Cluster" path="\Segment\Cluster" id="0x1F43B675" type="master" unknownsizeallowed="1"/>
+		<element name="Timestamp" path="\Segment\Cluster\Timestamp" id="0xE7" type="uinteger"/>
+		<element name="Position" path="\Segment\Cluster\Position" id="0xA7" type="uinteger"/>
+		<element name="PrevSize" path="\Segment\Cluster\PrevSize" id="0xAB" type="uinteger"/>
+		<element name="SimpleBlock" path="\Segment\Cluster\SimpleBlock" id="0xA3" type="binary"/>
+		<element name="BlockGroup" path="\Segment\Cluster\BlockGroup" id="0xA0" type="master"/>
+	`+extra)
+}
+
+// Being unregistered is not on its own a good enough reason to leave a child
+// out of a list documented as COMPLETE. Only a child the schema marks REMOVED
+// is a deliberate omission; a child the schema still declares current is a
+// coverage hole, and reporting it as a note would hide exactly the case this
+// check exists for.
+func TestCheckReportsCurrentChildMissingFromCompleteList(t *testing.T) {
+	current := clusterSchema(t, `
+		<element name="SomeCurrentChild" path="\Segment\Cluster\SomeCurrentChild" id="0x4FFD" type="binary"/>
+	`)
+	found := findings(Check(current), "containment", "Cluster")
+	if len(found) != 1 || found[0].Severity != SeverityGap {
+		t.Fatalf("expected one containment GAP for Cluster, got %v", found)
+	}
+	if !strings.Contains(found[0].Detail, "SomeCurrentChild") {
+		t.Errorf("detail does not name the child: %s", found[0].Detail)
+	}
+}
+
+// The same child, marked removed before the schema's own version, is the
+// deliberate case and reports as a note.
+func TestCheckAcceptsRemovedChildMissingFromCompleteList(t *testing.T) {
+	removed := clusterSchema(t, `
+		<element name="SomeRemovedChild" path="\Segment\Cluster\SomeRemovedChild" id="0x4FFD" type="binary" minver="0" maxver="0"/>
+	`)
+	found := findings(Check(removed), "containment", "Cluster")
+	if len(found) != 1 || found[0].Severity != SeverityNote {
+		t.Fatalf("expected one containment note for Cluster, got %v", found)
+	}
+	if !strings.Contains(found[0].Detail, "removed after version 0") {
+		t.Errorf("detail does not state why the omission is deliberate: %s", found[0].Detail)
+	}
+}
+
+// maxver at or above the schema's own version is not a removal.
+func TestRemovedReadsMaxverAgainstTheSchemaVersion(t *testing.T) {
+	schema := schemaFor(t, `
+		<element name="Current" path="\Segment\Current" id="0x4FFD" type="binary" maxver="4"/>
+		<element name="Old" path="\Segment\Old" id="0x4FFC" type="binary" maxver="2"/>
+		<element name="Unbounded" path="\Segment\Unbounded" id="0x4FFB" type="binary"/>
+	`)
+	want := map[string]bool{"Current": false, "Old": true, "Unbounded": false}
+	for _, e := range schema.Elements {
+		if got := schema.Removed(e); got != want[e.Name] {
+			t.Errorf("Removed(%s) = %v, want %v", e.Name, got, want[e.Name])
+		}
+	}
+}
+
+// The schema states recursion twice. If this checker's path parsing and the
+// recursive attribute disagree, Children() is wrong and every containment
+// verdict resting on it is worthless -- so the disagreement is a mismatch, not
+// a curiosity.
+func TestCheckReportsRecursionMarkerDisagreement(t *testing.T) {
+	schema := schemaFor(t, `
+		<element name="ChapterAtom" path="\Segment\Chapters\EditionEntry\+ChapterAtom" id="0xB6" type="master"/>
+	`)
+	found := findings(Check(schema), "path-consistency", "ChapterAtom")
+	if len(found) != 1 || found[0].Severity != SeverityMismatch {
+		t.Fatalf("expected a path-consistency mismatch, got %v", found)
+	}
+}
+
+func TestCheckAcceptsAgreeingRecursionMarkers(t *testing.T) {
+	schema := schemaFor(t, `
+		<element name="SimpleTag" path="\Segment\Tags\Tag\+SimpleTag" id="0x67C8" type="master" recursive="1"/>
+		<element name="Cluster" path="\Segment\Cluster" id="0x1F43B675" type="master"/>
+	`)
+	if found := findings(Check(schema), "path-consistency", "SimpleTag"); len(found) != 0 {
+		t.Fatalf("unexpected findings: %v", found)
+	}
+	if found := findings(Check(schema), "path-consistency", "Cluster"); len(found) != 0 {
+		t.Fatalf("unexpected findings: %v", found)
+	}
+}
+
+// A report that listed only what it verified would read as "the library
+// conforms". It has to say what it never looked at.
+func TestReportStatesWhatItDoesNotCheck(t *testing.T) {
+	schema := schemaFor(t, `
+		<element name="Cluster" path="\Segment\Cluster" id="0x1F43B675" type="master" maxOccurs="1"/>
+		<element name="Timestamp" path="\Segment\Cluster\Timestamp" id="0xE7" type="uinteger" default="0" range="not 0"/>
+	`)
+	report := Check(schema)
+	seen := map[string]int{}
+	for _, facet := range report.Unchecked {
+		seen[facet.Name] = facet.Elements
+		if facet.Missing == "" {
+			t.Errorf("facet %q does not say what capability it would need", facet.Name)
+		}
+	}
+	if seen["maxOccurs/minOccurs"] != 1 || seen["default"] != 1 || seen["range"] != 1 {
+		t.Fatalf("unchecked facets = %v", seen)
+	}
+}
+
 // A master the schema lets carry an unknown size needs a complete child list,
 // because that list is the only thing that can close it.
 func TestCheckReportsUnknownSizeMasterWithoutChildList(t *testing.T) {

@@ -43,7 +43,21 @@ func (r *Report) WriteText(w io.Writer, verbose bool) {
 	if notes > 0 {
 		fmt.Fprintf(w, "\n%d note(s) suppressed; pass -v to list them\n", notes)
 	}
+	r.writeUnchecked(w)
 	fmt.Fprintf(w, "\n%d mismatch(es)\n", r.Mismatches())
+}
+
+// writeUnchecked states the checker's own scope. A report that listed only what
+// it verified would read as "the library conforms", when what it means is "the
+// library conforms in the respects it makes claims about".
+func (r *Report) writeUnchecked(w io.Writer) {
+	if len(r.Unchecked) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\nnot checked -- the schema declares these and the library answers for none of them:\n")
+	for _, facet := range r.Unchecked {
+		fmt.Fprintf(w, "  %-20s %3d element(s)   would need: %s\n", facet.Name, facet.Elements, facet.Missing)
+	}
 }
 
 // WriteMissing renders the coverage worklist grouped by parent path, which is

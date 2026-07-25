@@ -61,6 +61,20 @@ type Report struct {
 	// path. It is the coverage worklist.
 	Missing  []SchemaElement
 	Findings []Finding
+	// Unchecked is what the schema declares and this checker compares against
+	// NOTHING. It is reported so a clean run cannot be mistaken for full spec
+	// conformance: these are facets the library makes no claim about, so there
+	// is no claim to verify -- each one is a capability the library does not
+	// have yet, not a hole in the checker.
+	Unchecked []Facet
+}
+
+// Facet is one schema capability the checker does not verify, with how many
+// elements declare it.
+type Facet struct {
+	Name     string
+	Elements int
+	Missing  string
 }
 
 // Mismatches returns the number of findings that are defects.
@@ -132,13 +146,60 @@ func Check(schemas ...*Schema) *Report {
 	}
 
 	checkUnassigned(report, schemas)
+	checkPathConsistency(report, schemas)
 	checkIdentityAndTypes(report, schemas)
 	checkContainment(report, schemas)
 	checkUnknownSize(report, schemas)
 	checkGlobals(report, schemas)
 	checkHeaderLimits(report, schemas)
 	collectMissing(report, schemas)
+	collectUnchecked(report, schemas)
 	return report
+}
+
+// collectUnchecked inventories what the schema says and the library does not
+// answer for. Every entry is a capability question, not a checker bug: the
+// checker can only compare a schema statement against a statement this library
+// makes, and for these it makes none.
+func collectUnchecked(report *Report, schemas []*Schema) {
+	facets := []struct {
+		name    string
+		missing string
+		has     func(SchemaElement) bool
+	}{
+		{"maxOccurs/minOccurs", "cardinality validation",
+			func(e SchemaElement) bool { return e.MaxOccurs != "" || e.MinOccurs != "" }},
+		{"minver", "DocTypeVersion gating",
+			func(e SchemaElement) bool { return e.MinVer >= 0 }},
+		{"default", "default-value resolution for an absent element",
+			func(e SchemaElement) bool { return e.Default != "" }},
+		{"range", "value-range validation",
+			func(e SchemaElement) bool { return e.Range != "" }},
+		{"restriction/enum", "enumerated value names",
+			func(e SchemaElement) bool { return e.Enums > 0 }},
+		{"length", "fixed payload-length validation",
+			func(e SchemaElement) bool { return e.Length != "" }},
+		{"recurring", "the once-per-Segment rule",
+			func(e SchemaElement) bool { return e.Recurring }},
+		{"webmproject.org", "the WebM profile subset",
+			func(e SchemaElement) bool { return e.WebM }},
+	}
+	for _, facet := range facets {
+		counted := make(map[parser.ElementID]bool)
+		for _, s := range schemas {
+			for _, e := range s.Elements {
+				if facet.has(e) {
+					counted[e.ID] = true
+				}
+			}
+		}
+		if len(counted) == 0 {
+			continue
+		}
+		report.Unchecked = append(report.Unchecked, Facet{
+			Name: facet.name, Elements: len(counted), Missing: facet.missing,
+		})
+	}
 }
 
 // checkUnassigned proves the IDs the test corpus uses as "no registry knows
@@ -154,6 +215,23 @@ func checkUnassigned(report *Report, schemas []*Schema) {
 		report.add(SeverityMismatch, "unassigned", declared.Name,
 			"%s is reserved by internal/ebmltest as an unassigned ID, but the schema declares it as %s",
 			id, declared.Name)
+	}
+}
+
+// checkPathConsistency verifies this checker's own path parsing rather than the
+// registry. The schema states recursion twice -- as a "+" on the path and as
+// recursive="1" -- and the two disagreeing means the path parser read something
+// wrong, which would silently give Children() the wrong answer and make every
+// containment verdict below it worthless.
+func checkPathConsistency(report *Report, schemas []*Schema) {
+	for _, s := range schemas {
+		for _, e := range s.Elements {
+			if e.Recursive != e.RecursiveAttr {
+				report.add(SeverityMismatch, "path-consistency", e.Name,
+					"path %q parsed recursive=%v but the schema attribute says %v",
+					e.Path, e.Recursive, e.RecursiveAttr)
+			}
+		}
 	}
 }
 
@@ -255,9 +333,23 @@ func checkContainment(report *Report, schemas []*Schema) {
 					matroska.Describe(child.ID))
 				continue
 			}
+			// Unregistered is not on its own a good enough reason. A child the
+			// schema still declares CURRENT is one a conforming writer emits,
+			// and leaving it out of both the list and the registry means this
+			// library reads a legal file as a nameless leaf inside a master it
+			// cannot reason about. Only a child the schema marks REMOVED
+			// (maxver below the schema's version) is a deliberate omission --
+			// which is why this check reads maxver instead of trusting a
+			// comment that says "deprecated".
+			if !schema.Removed(child) {
+				report.add(SeverityGap, "containment", info.Name,
+					"the schema declares %s (0x%X) as a CURRENT child, but it is in neither the child list nor the registry",
+					child.Name, uint32(child.ID))
+				continue
+			}
 			report.add(SeverityNote, "containment", info.Name,
-				"the schema declares %s (0x%X) as a child; it is absent from both the child list and the registry, so it cannot trigger a boundary",
-				child.Name, uint32(child.ID))
+				"the schema declares %s (0x%X) as a child but marks it removed after version %d; absent from both the child list and the registry, so it cannot trigger a boundary",
+				child.Name, uint32(child.ID), child.MaxVer)
 		}
 	}
 }

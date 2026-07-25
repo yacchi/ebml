@@ -80,14 +80,25 @@ Both schemas are needed: `ebml.xml` declares the EBML header elements and
 | `unknown-size` | every master the schema allows an unknown size for has a complete child list |
 | `global` | the elements the registry never lets end a master are exactly the schema's global elements |
 | `header-limits` | `parser.MaxElementIDLength` / `MaxElementSizeLength` match the schema's range for `EBMLMaxIDLength` / `EBMLMaxSizeLength` |
+| `unassigned` | the IDs `internal/ebmltest` reserves as "no registry knows this" are absent from the schema |
+| `path-consistency` | this checker's own path parsing agrees with the schema's `recursive` attribute |
 
-The sharpest one is `containment`. A complete child list may omit a schema child
-**only while that element is also unregistered** — `EndsUnknownSizeMaster`
-refuses to end a master on an unregistered ID, so an unregistered omission can
-never cause a premature boundary. This is why registering a new element is not a
-local change: **registering a Cluster or Segment child without adding it to
-`completeChildren` breaks the unknown-size boundary rule.** The checker reports
-exactly that case as a MISMATCH.
+The sharpest one is `containment`, and it has two halves.
+
+A complete child list may omit a schema child **only while that element is also
+unregistered** — `EndsUnknownSizeMaster` refuses to end a master on an
+unregistered ID, so an unregistered omission can never cause a premature
+boundary. This is why registering a new element is not a local change:
+**registering a Cluster or Segment child without adding it to `completeChildren`
+breaks the unknown-size boundary rule.** The checker reports that as a MISMATCH.
+
+Unregistered is not on its own a good enough reason, either. A child the schema
+still declares CURRENT is one a conforming writer emits, so leaving it out of
+both the list and the registry means this library reads a legal file as a
+nameless leaf inside a master it cannot reason about — reported as a GAP. Only a
+child the schema marks REMOVED (`maxver` below the schema's own version) is a
+deliberate omission, and that is read from `maxver`, never from a comment
+claiming the element is deprecated.
 
 **Then coverage.** Extend the registry one master at a time, in the grouping
 `-missing` prints:
@@ -112,6 +123,28 @@ Re-run the check, then `go -C go test ./...` and `go -C go vet ./...`.
 State the schema commit checked, the mismatch count, and coverage as
 `registered / declared`. When gaps were closed, say which masters' children were
 added and what is still missing.
+
+## What this does NOT check
+
+This is an ELEMENT-level check. It verifies identity, type, containment and the
+two header limits — and the report ends with the inventory of what it never
+looked at, so a clean run is not mistaken for full spec conformance:
+
+| schema declares | elements | what the library would need |
+|---|---|---|
+| `maxOccurs` / `minOccurs` | 241 | cardinality validation |
+| `minver` | 113 | DocTypeVersion gating |
+| `default` | 77 | resolving an absent element to its default |
+| `range` | 71 | value-range validation |
+| `restriction`/`enum` | 29 | enumerated value names |
+| `length` | 12 | fixed payload-length validation |
+| `recurring` | 3 | the once-per-Segment rule |
+| `webmproject.org` extension | 133 | the WebM profile subset |
+
+Each row is a CAPABILITY the library does not have, not a hole in the checker:
+the checker can only compare a schema statement against a statement this library
+makes, and for these it makes none. Adding one means designing the library
+feature first; the check then follows for free.
 
 ## Not covered by this skill
 

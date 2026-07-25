@@ -64,17 +64,41 @@ type SchemaElement struct {
 	// GlobalMinLevel is the lower bound of a global element's depth range, or
 	// -1 when the schema left it open.
 	GlobalMinLevel int
-	// Recursive reports the `+Name` marker: the element may nest inside itself,
-	// so it is also its own direct child.
+	// Recursive reports the `+Name` marker on the PATH: the element may nest
+	// inside itself, so it is also its own direct child.
 	Recursive bool
+	// RecursiveAttr reports the separate recursive="1" ATTRIBUTE, which states
+	// the same thing. Both are kept because they are two independent encodings
+	// of one fact, and disagreeing is how a path parser announces it is wrong.
+	RecursiveAttr bool
 	// UnknownSizeAllowed reports unknownsizeallowed="1": the master may be
 	// written with an unknown size, which is what makes a containment-derived
 	// boundary rule necessary for it.
 	UnknownSizeAllowed bool
-	// Range and Default are kept for the EBML header constraints; they are
-	// unused for Matroska body elements.
-	Range   string
-	Default string
+	// MinVer and MaxVer are the docType version range the element belongs to,
+	// or -1 when the schema leaves that end open. MaxVer is how the schema marks
+	// an element REMOVED: a maxver below the schema's own version means no
+	// conforming writer emits it any more. It is the machine-readable form of
+	// "deprecated", and the only reason this library may leave an element out of
+	// a containment list it calls complete.
+	MinVer int
+	MaxVer int
+	// The facets below are parsed but compared against NOTHING: the library
+	// makes no claim about cardinality, value ranges, defaults or payload
+	// lengths, so there is nothing to check them against yet. They are carried
+	// so the report can state its own scope -- see Report.Unchecked -- instead
+	// of looking complete by staying silent about what it ignores.
+	Range     string
+	Default   string
+	Length    string
+	MinOccurs string
+	MaxOccurs string
+	Recurring bool
+	// Enums counts the <restriction><enum> values declared for the element.
+	Enums int
+	// WebM reports the <extension type="webmproject.org" webm="1"/> marker: the
+	// element is part of the WebM profile of Matroska.
+	WebM bool
 }
 
 type xmlSchema struct {
@@ -85,13 +109,31 @@ type xmlSchema struct {
 }
 
 type xmlElement struct {
-	Name               string `xml:"name,attr"`
-	Path               string `xml:"path,attr"`
-	ID                 string `xml:"id,attr"`
-	Type               string `xml:"type,attr"`
-	Range              string `xml:"range,attr"`
-	Default            string `xml:"default,attr"`
-	UnknownSizeAllowed string `xml:"unknownsizeallowed,attr"`
+	Name               string         `xml:"name,attr"`
+	Path               string         `xml:"path,attr"`
+	ID                 string         `xml:"id,attr"`
+	Type               string         `xml:"type,attr"`
+	Range              string         `xml:"range,attr"`
+	Default            string         `xml:"default,attr"`
+	Length             string         `xml:"length,attr"`
+	MinOccurs          string         `xml:"minOccurs,attr"`
+	MaxOccurs          string         `xml:"maxOccurs,attr"`
+	MinVer             string         `xml:"minver,attr"`
+	MaxVer             string         `xml:"maxver,attr"`
+	Recursive          string         `xml:"recursive,attr"`
+	Recurring          string         `xml:"recurring,attr"`
+	UnknownSizeAllowed string         `xml:"unknownsizeallowed,attr"`
+	Restrictions       []xmlEnumList  `xml:"restriction"`
+	Extensions         []xmlExtension `xml:"extension"`
+}
+
+type xmlEnumList struct {
+	Enums []struct{} `xml:"enum"`
+}
+
+type xmlExtension struct {
+	Type string `xml:"type,attr"`
+	WebM string `xml:"webm,attr"`
 }
 
 // LoadSchema reads and parses an EBML Schema document from path.
@@ -121,9 +163,24 @@ func ParseSchema(source string, data []byte) (*Schema, error) {
 			ID:                 id,
 			Type:               e.Type,
 			Path:               e.Path,
+			RecursiveAttr:      e.Recursive == "1",
 			UnknownSizeAllowed: e.UnknownSizeAllowed == "1",
+			MinVer:             optionalInt(e.MinVer),
+			MaxVer:             optionalInt(e.MaxVer),
 			Range:              e.Range,
 			Default:            e.Default,
+			Length:             e.Length,
+			MinOccurs:          e.MinOccurs,
+			MaxOccurs:          e.MaxOccurs,
+			Recurring:          e.Recurring == "1",
+		}
+		for _, restriction := range e.Restrictions {
+			element.Enums += len(restriction.Enums)
+		}
+		for _, extension := range e.Extensions {
+			if extension.Type == "webmproject.org" && extension.WebM == "1" {
+				element.WebM = true
+			}
 		}
 		if err := element.parsePath(); err != nil {
 			return nil, fmt.Errorf("%s: element %s: %w", source, e.Name, err)
@@ -131,6 +188,34 @@ func ParseSchema(source string, data []byte) (*Schema, error) {
 		schema.Elements = append(schema.Elements, element)
 	}
 	return schema, nil
+}
+
+// optionalInt reads an optional integer attribute, reporting -1 for an absent
+// or unreadable one. An absent minver/maxver means "no bound at that end", not
+// zero, and confusing the two would read every element as removed.
+func optionalInt(s string) int {
+	if s == "" {
+		return -1
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return -1
+	}
+	return v
+}
+
+// Removed reports whether the schema marks the element as no longer part of the
+// document type: a maxver below the schema's own docType version. This is the
+// schema's only machine-readable statement of deprecation.
+func (s *Schema) Removed(e SchemaElement) bool {
+	if e.MaxVer < 0 {
+		return false
+	}
+	version, err := strconv.Atoi(s.Version)
+	if err != nil {
+		return false
+	}
+	return e.MaxVer < version
 }
 
 func parseSchemaID(s string) (parser.ElementID, error) {

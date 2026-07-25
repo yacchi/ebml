@@ -242,7 +242,11 @@ focused on broader reading conformance and Matroska coverage:
    `ebml-specification@a4b3c4a`. The three it does not name are `SilentTracks`,
    `SilentTrackNumber` and `EncryptedBlock`, left out on purpose and explained
    at `completeChildren`. Remaining work is VALUE coverage — decoding helpers
-   for the types now merely named — not more IDs.
+   for the types now merely named — not more IDs. What the schema declares and
+   this library answers for NOTHING about is inventoried by the checker itself
+   (cardinality, `minver` gating, defaults, ranges, enums, fixed lengths,
+   `recurring`, the WebM profile). Each is a library capability that does not
+   exist yet, so the check for it can only be written after the feature is.
    The core remains terminal on structural corruption; recovery belongs to the
    opt-in `ext/fragment` paths — `WithResync` for structural failures,
    `WithSkipContentErrors` for content ones — and each acts on its own class only.
