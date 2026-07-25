@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/yacchi/ebml-reader/matroska"
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
 )
 
 func scan(r io.Reader, w io.Writer) error {

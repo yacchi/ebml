@@ -22,6 +22,16 @@
 // package, so a node is just an element. Likewise the entry point is Parse, read
 // as tree.Parse(data), rather than a stuttering ParseTree.
 //
+// # Marshal, and why it proves the model is lossless
+//
+// Marshal and MarshalBytes write a tree back out as EBML, through package writer,
+// the library's only encoder. Parse followed by Marshal reproduces the input byte
+// for byte as long as no payload was elided by a retention cap: leaf payloads go
+// out verbatim, and each header is rebuilt at its original size-VINT width, which
+// the retained HeaderLen still states. A round trip over the committed fixture
+// corpus is therefore a conformance test of retention itself -- anything the model
+// dropped or normalised would show up as a differing byte.
+//
 // # Two orthogonal access modes
 //
 // The tree offers two deliberately distinguishable ways to reach a value, and

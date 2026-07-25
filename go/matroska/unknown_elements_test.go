@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yacchi/ebml-reader/ext/tree"
-	"github.com/yacchi/ebml-reader/matroska"
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/ext/tree"
+	"github.com/yacchi/ebml/internal/ebmltest"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
 )
 
 // Vendor element IDs: valid 2-byte EBML IDs that RFC 9559 does not define, so
@@ -43,16 +44,19 @@ func vendorRegistry(t *testing.T) *matroska.Registry {
 }
 
 // vendorStream builds a Segment holding a vendor master followed by a standard
-// Info, and returns the stream plus the payload bytes of the vendor master.
+// Info, and returns the stream plus the payload bytes of the vendor master. That
+// payload is the vendor master's children encoded on their own, which is exactly
+// what a reader that does not know the element reads as one opaque leaf.
 func vendorStream() (stream, vendorPayload []byte) {
-	vendorPayload = concat(
-		buildLeaf(idVendorCount, []byte{0x07}),
-		buildMaster(idVendorInner, buildLeaf(idVendorNote, []byte("hi"))),
-	)
-	stream = buildMaster(matroska.IDSegment,
-		buildLeaf(idVendorBox, vendorPayload),
-		buildMaster(matroska.IDInfo, buildLeaf(matroska.IDTimestampScale, []byte{0x0F, 0x42, 0x40})),
-	)
+	vendorChildren := []ebmltest.Node{
+		ebmltest.Leaf(idVendorCount, []byte{0x07}),
+		ebmltest.Master(idVendorInner, ebmltest.Leaf(idVendorNote, []byte("hi"))),
+	}
+	vendorPayload = ebmltest.Encode(vendorChildren...)
+	stream = ebmltest.Encode(ebmltest.Master(matroska.IDSegment,
+		ebmltest.Master(idVendorBox, vendorChildren...),
+		ebmltest.Master(matroska.IDInfo, ebmltest.Leaf(matroska.IDTimestampScale, []byte{0x0F, 0x42, 0x40})),
+	))
 	return stream, vendorPayload
 }
 
@@ -263,39 +267,8 @@ func scan(t *testing.T, data []byte, classifier parser.KindClassifier, onPayload
 	return whole
 }
 
-// ---- minimal EBML writers, so these tests shape their own input ----
-
-func concat(parts ...[]byte) []byte {
-	var out []byte
-	for _, part := range parts {
-		out = append(out, part...)
-	}
-	return out
-}
-
-func buildIDBytes(id parser.ElementID) []byte {
-	switch {
-	case id <= 0xFF:
-		return []byte{byte(id)}
-	case id <= 0xFFFF:
-		return []byte{byte(id >> 8), byte(id)}
-	case id <= 0xFFFFFF:
-		return []byte{byte(id >> 16), byte(id >> 8), byte(id)}
-	default:
-		return []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}
-	}
-}
-
-// buildLeaf encodes one element with a 1-byte size VINT; the payloads here stay
-// well under 127 bytes.
-func buildLeaf(id parser.ElementID, payload []byte) []byte {
-	if len(payload) > 0x7E {
-		panic("test helper: payload too large for a 1-byte size VINT")
-	}
-	return concat(buildIDBytes(id), []byte{byte(0x80 | len(payload))}, payload)
-}
-
-// buildMaster encodes a known-size master over already-encoded children.
-func buildMaster(id parser.ElementID, children ...[]byte) []byte {
-	return buildLeaf(id, concat(children...))
-}
+// ---- input shaping ----
+//
+// These tests hand-shape their input through internal/ebmltest, which builds it with
+// package writer, the library's only EBML encoder: a test that encoded bytes of its
+// own could agree with itself while disagreeing with the library.

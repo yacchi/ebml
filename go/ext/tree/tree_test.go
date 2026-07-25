@@ -7,10 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yacchi/ebml-reader/ext/tree"
-	"github.com/yacchi/ebml-reader/internal/kvsgen"
-	"github.com/yacchi/ebml-reader/matroska"
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/ext/tree"
+	"github.com/yacchi/ebml/internal/ebmltest"
+	"github.com/yacchi/ebml/internal/kvsgen"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
+	"github.com/yacchi/ebml/writer"
 )
 
 // ebmlEpoch mirrors the EBML date origin the accessors decode against.
@@ -217,13 +219,13 @@ func TestStrictAccess(t *testing.T) {
 // TestAncestorReturnsNearestMatch pins the "nearest enclosing match" rule using a
 // re-parsed nested document, where the same ID encloses a node twice.
 func TestAncestorReturnsNearestMatch(t *testing.T) {
-	inner := buildMaster(matroska.IDTag,
-		buildMaster(matroska.IDSimpleTag,
-			buildMaster(matroska.IDSimpleTag,
-				buildLeaf(matroska.IDTagString, []byte("v")),
+	inner := ebmltest.Encode(ebmltest.Master(matroska.IDTag,
+		ebmltest.Master(matroska.IDSimpleTag,
+			ebmltest.Master(matroska.IDSimpleTag,
+				ebmltest.UTF8(matroska.IDTagString, "v"),
 			),
 		),
-	)
+	))
 	roots, err := tree.Parse(inner)
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
@@ -305,7 +307,7 @@ func TestLooseAccess(t *testing.T) {
 // that package matroska is the default, and that WithRegistry overrides it
 // without affecting retention or decoding.
 func TestRegistryResolution(t *testing.T) {
-	data := buildLeaf(matroska.IDTimestampScale, []byte{0x0F, 0x42, 0x40})
+	data := ebmltest.Encode(ebmltest.Uint(matroska.IDTimestampScale, 1000000))
 	roots, err := tree.Parse(data)
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
@@ -356,7 +358,7 @@ func TestRegistryResolution(t *testing.T) {
 // raw payload: an ID no registry knows still parses, still nests, still reads.
 func TestUnregisteredElementIsRetainedAndReadable(t *testing.T) {
 	const unknownID parser.ElementID = 0x81 // a 1-byte VINT ID that is not registered
-	data := buildLeaf(unknownID, []byte{0x02, 0x9A})
+	data := ebmltest.Encode(ebmltest.Leaf(unknownID, []byte{0x02, 0x9A}))
 	roots, err := tree.Parse(data)
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
@@ -564,8 +566,9 @@ func TestWithMaxPayload(t *testing.T) {
 // which is also how a blob read as one opaque leaf is re-parsed.
 func TestWithClassifier(t *testing.T) {
 	const customMaster parser.ElementID = 0x81
-	inner := buildLeaf(matroska.IDTagString, []byte("nested"))
-	data := buildMaster(customMaster, inner)
+	innerNode := ebmltest.UTF8(matroska.IDTagString, "nested")
+	inner := ebmltest.Encode(innerNode)
+	data := ebmltest.Encode(ebmltest.Master(customMaster, innerNode))
 
 	roots, err := tree.Parse(data)
 	if err != nil {
@@ -644,14 +647,17 @@ func TestParseErrorKeepsGoodPrefix(t *testing.T) {
 	}
 
 	// A non-master with unknown size is not recoverable structure.
-	badSize := append(buildIDBytes(matroska.IDTagString), 0xFF)
+	badSize := append(writer.EncodeID(matroska.IDTagString), 0xFF)
 	if _, err := tree.Parse(badSize); err == nil {
 		t.Error("Parse() accepted a non-master with unknown size")
 	}
 }
 
-// ---- test helpers: minimal EBML writers, so the tests do not depend on the
-// fixture generator for hand-shaped inputs ----
+// ---- test helpers ----
+//
+// Hand-shaped inputs keep these tests independent of the fixture generator, and they
+// are built through internal/ebmltest, whose ENCODING is package writer's, the
+// library's only EBML encoder, so no test carries an encoder of its own.
 
 // fakeRegistry answers for every ID, to prove Name/Describe/Type come from the
 // registry and that a registry never gates retention or decoding.
@@ -663,37 +669,4 @@ func (fakeRegistry) Describe(parser.ElementID) string { return "OVERRIDDEN!" }
 
 func (fakeRegistry) TypeFor(parser.ElementID) (matroska.ValueType, bool) {
 	return matroska.TypeBinary, true
-}
-
-func buildIDBytes(id parser.ElementID) []byte {
-	switch {
-	case id <= 0xFF:
-		return []byte{byte(id)}
-	case id <= 0xFFFF:
-		return []byte{byte(id >> 8), byte(id)}
-	case id <= 0xFFFFFF:
-		return []byte{byte(id >> 16), byte(id >> 8), byte(id)}
-	default:
-		return []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}
-	}
-}
-
-// buildLeaf encodes one element with a 1-byte size VINT (payloads stay under 127
-// bytes in these tests).
-func buildLeaf(id parser.ElementID, payload []byte) []byte {
-	if len(payload) > 0x7E {
-		panic("test helper: payload too large for a 1-byte size VINT")
-	}
-	out := buildIDBytes(id)
-	out = append(out, byte(0x80|len(payload)))
-	return append(out, payload...)
-}
-
-// buildMaster encodes a known-size master over already-encoded children.
-func buildMaster(id parser.ElementID, children ...[]byte) []byte {
-	var payload []byte
-	for _, c := range children {
-		payload = append(payload, c...)
-	}
-	return buildLeaf(id, payload)
 }

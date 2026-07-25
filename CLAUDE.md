@@ -1,8 +1,10 @@
-# CLAUDE.md - ebml-reader
+# CLAUDE.md - ebml
 
 This repository is English-only. It is a streaming, cursor-based EBML/Matroska
-reader for Go 1.22, rooted at `go/` and published as
-`github.com/yacchi/ebml-reader`.
+library for Go 1.22, rooted at `go/` and published as
+`github.com/yacchi/ebml`. The CLI binary is `ebml` (`go/cmd/ebml`). The
+repository directory is still named `ebml-reader`; that is intentional and
+carries no meaning.
 
 ## Architecture and standing design rules
 
@@ -26,6 +28,23 @@ reader for Go 1.22, rooted at `go/` and published as
   known-size master with payload outstanding (`PrematureCloseError`); a
   known-size boundary belongs to the stream and must not be discarded.
   `LeaveMaster` remains the ordinary close at a declared end.
+* `go/writer` is the repository's ONLY EBML encoder. No test, fixture generator or
+  extension may carry an encoder of its own: `internal/kvsgen` builds the corpus
+  through it, `ext/tree.Marshal` composes its primitives, and hand-shaped test
+  inputs call it too — through `internal/ebmltest`, the ONE shared shaping layer
+  over the public writer API (`Leaf`/`Uint`/`String`/`UTF8`/`Master`/
+  `UnknownMaster`/`Encode`). A test may not re-implement it per file, and an
+  unknown-size master comes from the writer's `UnknownSize` strategy, never from
+  hand-concatenating an ID with the unknown-size marker. Like the cursor the writer
+  holds no element knowledge — the CALLER picks the value type, mirroring the
+  reader's `AsUint`/`AsString` choice — and it refuses a value the reader could not
+  return unchanged: a string carrying a NUL byte is rejected, since a reader stops
+  at the first NUL.
+* (h) Exactly one EBML encoder exists in the repository: anything that emits
+  bytes uses `go/writer`.
+* (i) The writer holds no element knowledge either; the caller picks the value
+  type.
+* (j) Parse-then-marshal stays byte-identical for every committed fixture.
 * The two access modes exist only in `ext`: loose extraction ignores containment
   and returns every matching node; strict access uses exact paths and ancestry.
   Loose nodes retain their structure so the modes compose.
@@ -66,8 +85,17 @@ The core is working and tested:
   knowledge and vendor extensibility. Unknown IDs classify as readable binary
   leaves.
 * `go/ext/tree` retains a generic tree and implements loose `Descendants` and
-  strict `Find`/ancestry navigation. `go/ext/fragment` assembles one
+  strict `Find`/ancestry navigation. `Marshal`/`MarshalBytes` write a tree back
+  out; parse then marshal is BYTE-IDENTICAL for every committed fixture unless a
+  payload was elided by a retention cap, because the retained `HeaderLen` still
+  gives each header's original size-VINT width. `go/ext/fragment` assembles one
   `Fragment` per completed `Cluster` using only exported core APIs.
+* The module is `github.com/yacchi/ebml`, and the CLI is `ebml` under
+  `go/cmd/ebml`. The public `go/writer` package replaced the four private
+  encoders formerly in `internal/kvsgen`, `ext/tree/tree_test.go`,
+  `ext/fragment/synthetic_test.go`, and `matroska/unknown_elements_test.go`.
+  The fixture corpus is generated through the public writer, and round-trip
+  conformance checks retained trees byte-for-byte.
 * The CLI supports `dump`, `xml`, and `genkvs`. The synthetic corpus covers
   KVS topology, tail emission, false EBML magic in PCM, multiple clusters and
   segments, tagless and filtered streams, gaps, `scaled_timestamps`, and
@@ -77,6 +105,9 @@ Leaf decoding helpers and `ParseSimpleBlock` are convenience functionality in
 `parser`; they do not turn the core into a retained document model.
 
 ## Roadmap
+
+Writing and round-trip conformance are complete; remaining work is focused on
+broader reading conformance and Matroska coverage:
 
 1. Add conformance coverage for nested unknown-size masters and verify their
    outward structural closure behavior.
@@ -93,7 +124,7 @@ Run commands from `go/`:
 ```bash
 go test ./...
 go vet ./...
-go run ./cmd/ebml-reader genkvs
+go run ./cmd/ebml genkvs
 ```
 
 Fixtures under `fixtures/**/*.ebml.hex` are commented hexadecimal and entirely

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/parser"
 )
 
 // vendor element IDs used by the registry tests: valid 2-byte EBML IDs that the

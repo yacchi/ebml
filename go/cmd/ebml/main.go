@@ -1,4 +1,4 @@
-// Command ebml-reader is a small CLI over the streaming EBML/Matroska cursor.
+// Command ebml is a small CLI over the streaming EBML/Matroska cursor.
 //
 // Subcommands:
 //
@@ -23,14 +23,14 @@ import (
 )
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "Usage: ebml-reader <command> [flags] [FILE]")
+	fmt.Fprintln(w, "Usage: ebml <command> [flags] [FILE]")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  dump     print a human-readable indented EBML element tree")
 	fmt.Fprintln(w, "  xml      emit the EBML element tree as well-formed XML")
 	fmt.Fprintln(w, "  genkvs   regenerate the synthetic KVS fixture corpus")
 	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Run 'ebml-reader <command> -h' for command-specific flags.")
+	fmt.Fprintln(w, "Run 'ebml <command> -h' for command-specific flags.")
 }
 
 func main() {
@@ -53,7 +53,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		usage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "ebml-reader: unknown command %q\n\n", args[0])
+		fmt.Fprintf(stderr, "ebml: unknown command %q\n\n", args[0])
 		usage(stderr)
 		return 2
 	}

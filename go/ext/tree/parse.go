@@ -3,8 +3,8 @@ package tree
 import (
 	"fmt"
 
-	"github.com/yacchi/ebml-reader/matroska"
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
 )
 
 // ParseError reports that Parse could not continue because the input is not

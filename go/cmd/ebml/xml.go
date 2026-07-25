@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/yacchi/ebml-reader/matroska"
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
 )
 
 type xmlOptions struct {
@@ -176,7 +176,7 @@ func xmlCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	maxBinary := fs.Int("max-binary", 16, "max bytes of a binary leaf to emit as hex text (0 = none)")
 	asHex := fs.Bool("hex", false, "read the commented-hex fixture format (# comments + hex bytes) instead of raw EBML")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: ebml-reader xml [flags] [FILE]")
+		fmt.Fprintln(stderr, "Usage: ebml xml [flags] [FILE]")
 		fmt.Fprintln(stderr, "  Emit the EBML tree as well-formed XML. FILE absent or \"-\" reads stdin.")
 		fs.PrintDefaults()
 	}
@@ -185,12 +185,12 @@ func xmlCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	in, closeFn, err := openInput(fs.Args(), stdin)
 	if err != nil {
-		fmt.Fprintf(stderr, "ebml-reader: %v\n", err)
+		fmt.Fprintf(stderr, "ebml: %v\n", err)
 		return 1
 	}
 	defer closeFn()
 	if err := runXML(in, stdout, xmlOptions{maxBinary: *maxBinary, hex: *asHex}); err != nil {
-		fmt.Fprintf(stderr, "ebml-reader: %v\n", err)
+		fmt.Fprintf(stderr, "ebml: %v\n", err)
 		return 1
 	}
 	return 0

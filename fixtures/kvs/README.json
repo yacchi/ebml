@@ -269,6 +269,6 @@
       "notes": "0xEE leaf and 0x4FFF master-shaped element are unregistered; the reader never breaks on them."
     }
   },
-  "generated_by": "go run ./cmd/ebml-reader genkvs",
+  "generated_by": "go run ./cmd/ebml genkvs",
   "schema": "each .ebml.hex is a synthetic MKV stream; each golden/kvs/\u003cname\u003e.jsonl is the cursor event log (KVS classifier) and is split-invariant."
 }

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/parser"
 )
 
 func TestLookupWellKnownElements(t *testing.T) {

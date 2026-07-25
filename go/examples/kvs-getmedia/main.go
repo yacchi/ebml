@@ -35,8 +35,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yacchi/ebml-reader/ext/fragment"
-	"github.com/yacchi/ebml-reader/matroska"
+	"github.com/yacchi/ebml/ext/fragment"
+	"github.com/yacchi/ebml/matroska"
 )
 
 // Well-known AWS KVS tag names carried in each fragment's Tags element. They are

@@ -1,6 +1,6 @@
 package matroska
 
-import "github.com/yacchi/ebml-reader/parser"
+import "github.com/yacchi/ebml/parser"
 
 // KindForElementID is the classifier a cursor is constructed with (parser.New,
 // parser.NewScanner): registered masters become parser.KindMaster, so the cursor

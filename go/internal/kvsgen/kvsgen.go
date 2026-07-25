@@ -1,6 +1,11 @@
 // Package kvsgen builds minimal, 100% synthetic Matroska/EBML byte streams that
 // reproduce the shape of Amazon Connect KVS GetMedia fragments, from scratch.
 //
+// Every byte is produced by package writer, the library's only EBML encoder: the
+// generator owns the SHAPE of a fragment and nothing about the encoding, so a
+// fixture is also a test of the writer, and the committed corpus is what proves the
+// two agree.
+//
 // DATA SAFETY: every value here is fabricated. ContactId/InstanceId are fake
 // RFC-4122-shaped UUIDs, PCM is a deterministic counter pattern, SegmentUUIDs and
 // tokens are synthetic. Nothing is copied or derived from any real capture.
@@ -21,11 +26,11 @@
 package kvsgen
 
 import (
-	"encoding/binary"
-	"math"
+	"bytes"
 
-	"github.com/yacchi/ebml-reader/matroska"
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
+	"github.com/yacchi/ebml/writer"
 )
 
 // ---- Fake, synthetic identifiers (never real customer data) ----
@@ -50,85 +55,65 @@ const (
 	idUnregisteredMaster parser.ElementID = 0x4FFF
 )
 
-// ---- Low-level EBML encoders ----
+// ---- Stream construction ----
 
-// encodeID returns the element ID bytes (big-endian, leading zero bytes trimmed);
-// the ID value already carries its EBML length-marker bits.
-func encodeID(id parser.ElementID) []byte {
-	b := []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}
-	start := 0
-	for start < 3 && b[start] == 0 {
-		start++
+// stream builds one synthetic byte stream through a writer.Writer. It exists only
+// to keep the fixture builders declarative: every method is one writer call whose
+// error cannot happen here.
+type stream struct {
+	buf bytes.Buffer
+	w   *writer.Writer
+}
+
+func newStream() *stream {
+	s := &stream{}
+	s.w = writer.New(&s.buf)
+	return s
+}
+
+// must stops the generator on a writer error. The IDs here are constants from the
+// registry and the payloads are tens of bytes, so every error the writer can report
+// means this generator is wrong — a programmer error, not an input condition.
+func must(err error) {
+	if err != nil {
+		panic("kvsgen: " + err.Error())
 	}
-	return append([]byte(nil), b[start:]...)
 }
 
-// encodeSize returns a minimal known-size EBML VINT for n (never all-ones, so it
-// is never mistaken for unknown-size).
-func encodeSize(n uint64) []byte {
-	for l := 1; l <= 8; l++ {
-		max := uint64(1)<<(7*uint(l)) - 1
-		if n < max {
-			v := n | (uint64(1) << (7 * uint(l)))
-			out := make([]byte, l)
-			for i := l - 1; i >= 0; i-- {
-				out[i] = byte(v)
-				v >>= 8
-			}
-			return out
-		}
+// bytes finishes the document and returns it. It is called once, at the end of a
+// fixture builder.
+func (s *stream) bytes() []byte {
+	must(s.w.Close())
+	return s.buf.Bytes()
+}
+
+// master writes a KNOWN-size master over whatever body writes, which may be nil for
+// an empty master. Its size VINT is minimal, since the writer buffers the subtree.
+func (s *stream) master(id parser.ElementID, body func()) {
+	must(s.w.StartMaster(id, writer.Buffered()))
+	if body != nil {
+		body()
 	}
-	panic("kvsgen: size too large to encode")
+	must(s.w.EndMaster())
 }
 
-// unknownSize is the 8-byte unknown-size VINT (0x01FFFFFFFFFFFFFF).
-func unknownSize() []byte {
-	return []byte{0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
-}
-
-// encodeUint returns a minimal big-endian unsigned integer (at least 1 byte).
-func encodeUint(v uint64) []byte {
-	if v == 0 {
-		return []byte{0x00}
+// unknownMaster writes a master with the 8-byte UNKNOWN-size marker, which is what
+// a real KVS Segment carries: nothing in the bytes says where it ends.
+func (s *stream) unknownMaster(id parser.ElementID, body func()) {
+	must(s.w.StartMaster(id, writer.UnknownSize()))
+	if body != nil {
+		body()
 	}
-
-	n := 0
-	for x := v; x > 0; x >>= 8 {
-		n++
-	}
-	out := make([]byte, n)
-	for i := n - 1; i >= 0; i-- {
-		out[i] = byte(v)
-		v >>= 8
-	}
-	return out
+	must(s.w.EndMaster())
 }
 
-func encodeFloat(v float64) []byte {
-	out := make([]byte, 8)
-	binary.BigEndian.PutUint64(out, math.Float64bits(v))
-	return out
-}
+func (s *stream) binary(id parser.ElementID, payload []byte) { must(s.w.Binary(id, payload)) }
 
-func elem(id parser.ElementID, payload []byte) []byte {
-	out := encodeID(id)
-	out = append(out, encodeSize(uint64(len(payload)))...)
-	return append(out, payload...)
-}
+func (s *stream) uint(id parser.ElementID, v uint64) { must(s.w.Uint(id, v)) }
 
-func elemUnknown(id parser.ElementID, payload []byte) []byte {
-	out := encodeID(id)
-	out = append(out, unknownSize()...)
-	return append(out, payload...)
-}
+func (s *stream) str(id parser.ElementID, v string) { must(s.w.String(id, v)) }
 
-func concat(parts ...[]byte) []byte {
-	var out []byte
-	for _, p := range parts {
-		out = append(out, p...)
-	}
-	return out
-}
+func (s *stream) float(id parser.ElementID, v float64) { must(s.w.Float(id, v, writer.Float64)) }
 
 // ---- Synthetic PCM ----
 
@@ -152,19 +137,19 @@ func pcmWithEBMLMagic(n int) []byte {
 
 // ---- Matroska element builders ----
 
-func simpleTag(name, value string) []byte {
-	return elem(matroska.IDSimpleTag, concat(
-		elem(matroska.IDTagName, []byte(name)),
-		elem(matroska.IDTagString, []byte(value)),
-	))
+func (s *stream) simpleTag(name, value string) {
+	s.master(matroska.IDSimpleTag, func() {
+		s.str(matroska.IDTagName, name)
+		s.str(matroska.IDTagString, value)
+	})
 }
 
-func ebmlHeader() []byte {
-	return elem(matroska.IDEBML, concat(
-		elem(matroska.IDEBMLVersion, encodeUint(1)),
-		elem(matroska.IDEBMLReadVersion, encodeUint(1)),
-		elem(matroska.IDDocType, []byte("matroska")),
-	))
+func (s *stream) ebmlHeader() {
+	s.master(matroska.IDEBML, func() {
+		s.uint(matroska.IDEBMLVersion, 1)
+		s.uint(matroska.IDEBMLReadVersion, 1)
+		s.str(matroska.IDDocType, "matroska")
+	})
 }
 
 // segmentUID returns a DETERMINISTIC 16-byte synthetic Segment UID derived from
@@ -178,81 +163,86 @@ func segmentUID(seed byte) []byte {
 	return out
 }
 
-// infoElement builds a Segment Info element carrying a synthetic SegmentUUID and
-// the given TimestampScale in nanoseconds (defaultTimestampScale is the Matroska
-// default; a different value makes a fixture exercise the scaling path).
-func infoElement(uid []byte, timestampScale uint64) []byte {
-	return elem(matroska.IDInfo, concat(
-		elem(matroska.IDSegmentUUID, uid),
-		elem(matroska.IDTimestampScale, encodeUint(timestampScale)),
-	))
+// info writes a Segment Info element carrying a synthetic SegmentUUID and the given
+// TimestampScale in nanoseconds (defaultTimestampScale is the Matroska default; a
+// different value makes a fixture exercise the scaling path).
+func (s *stream) info(uid []byte, timestampScale uint64) {
+	s.master(matroska.IDInfo, func() {
+		s.binary(matroska.IDSegmentUUID, uid)
+		s.uint(matroska.IDTimestampScale, timestampScale)
+	})
 }
 
-// trackEntry builds one audio TrackEntry with a Name and standard audio
+// trackEntry writes one audio TrackEntry with a Name and standard audio
 // parameters. The names
 // (AUDIO_FROM_CUSTOMER / AUDIO_TO_CUSTOMER) are generic Amazon Connect track-name
 // conventions — structural channel identifiers, not PII.
-func trackEntry(number uint64, name string, audioParams bool) []byte {
-	payload := concat(
-		elem(matroska.IDTrackNumber, encodeUint(number)),
-		elem(matroska.IDTrackType, encodeUint(2)), // 2 = audio
-		elem(matroska.IDCodecID, []byte(fakeCodecID)),
-		elem(matroska.IDName, []byte(name)),
-	)
-	if audioParams {
-		payload = append(payload, elem(matroska.IDAudio, concat(
-			elem(matroska.IDSamplingFrequency, encodeFloat(8000)),
-			elem(matroska.IDChannels, encodeUint(1)),
-			elem(matroska.IDBitDepth, encodeUint(16)),
-		))...)
-	}
-	return elem(matroska.IDTrackEntry, payload)
+func (s *stream) trackEntry(number uint64, name string, audioParams bool) {
+	s.master(matroska.IDTrackEntry, func() {
+		s.uint(matroska.IDTrackNumber, number)
+		s.uint(matroska.IDTrackType, 2) // 2 = audio
+		s.str(matroska.IDCodecID, fakeCodecID)
+		s.str(matroska.IDName, name)
+		if audioParams {
+			s.master(matroska.IDAudio, func() {
+				s.float(matroska.IDSamplingFrequency, 8000)
+				s.uint(matroska.IDChannels, 1)
+				s.uint(matroska.IDBitDepth, 16)
+			})
+		}
+	})
 }
 
-func tracksElement(audioParams bool) []byte {
-	return elem(matroska.IDTracks, concat(
-		trackEntry(1, "AUDIO_FROM_CUSTOMER", audioParams),
-		trackEntry(2, "AUDIO_TO_CUSTOMER", audioParams),
-	))
+func (s *stream) tracks(audioParams bool) {
+	s.master(matroska.IDTracks, func() {
+		s.trackEntry(1, "AUDIO_FROM_CUSTOMER", audioParams)
+		s.trackEntry(2, "AUDIO_TO_CUSTOMER", audioParams)
+	})
 }
 
-// tagsElement builds a Tags element. If contactID is "" the ContactId SimpleTag
-// is omitted (tagless-by-contact fragment).
-func tagsElement(producerTS, fragmentNumber, contactID string) []byte {
-	tags := concat(
-		simpleTag("AWS_KINESISVIDEO_PRODUCER_TIMESTAMP", producerTS),
-		simpleTag("AWS_KINESISVIDEO_FRAGMENT_NUMBER", fragmentNumber),
-		simpleTag("AWS_KINESISVIDEO_CONTINUATION_TOKEN", fakeContinuation),
-	)
-	if contactID != "" {
-		tags = append(tags, simpleTag("ContactId", contactID)...)
-	}
-	tags = append(tags, simpleTag("InstanceId", fakeInstance)...)
-
-	tag := elem(matroska.IDTag, concat(
-		elem(matroska.IDTargets, nil), // empty Targets master
-		tags,
-	))
-	return elem(matroska.IDTags, tag)
+// tags writes a Tags element. If contactID is "" the ContactId SimpleTag is omitted
+// (tagless-by-contact fragment).
+func (s *stream) tags(producerTS, fragmentNumber, contactID string) {
+	s.master(matroska.IDTags, func() {
+		s.master(matroska.IDTag, func() {
+			s.master(matroska.IDTargets, nil) // empty Targets master
+			s.simpleTag("AWS_KINESISVIDEO_PRODUCER_TIMESTAMP", producerTS)
+			s.simpleTag("AWS_KINESISVIDEO_FRAGMENT_NUMBER", fragmentNumber)
+			s.simpleTag("AWS_KINESISVIDEO_CONTINUATION_TOKEN", fakeContinuation)
+			if contactID != "" {
+				s.simpleTag("ContactId", contactID)
+			}
+			s.simpleTag("InstanceId", fakeInstance)
+		})
+	})
 }
 
-// simpleBlock builds a SimpleBlock leaf: track VINT (=1), int16 BE relative
-// timecode, flags byte, then PCM. The whole thing is one binary leaf.
-func simpleBlock(timecode int16, audio []byte) []byte {
+// block is one synthetic SimpleBlock: a relative timecode, which may be negative,
+// and the PCM it carries.
+type block struct {
+	timecode int16
+	audio    []byte
+}
+
+// simpleBlock writes a SimpleBlock leaf: track VINT (=1), int16 BE relative
+// timecode, flags byte, then PCM. The whole thing is one binary leaf — the block
+// structure lives inside the payload, not in EBML.
+func (s *stream) simpleBlock(b block) {
 	content := []byte{0x81} // track number 1 as a 1-byte VINT
-	content = append(content, byte(uint16(timecode)>>8), byte(uint16(timecode)))
+	content = append(content, byte(uint16(b.timecode)>>8), byte(uint16(b.timecode)))
 	content = append(content, 0x00) // flags
-	content = append(content, audio...)
-	return elem(matroska.IDSimpleBlock, content)
+	content = append(content, b.audio...)
+	s.binary(matroska.IDSimpleBlock, content)
 }
 
-// clusterElement builds a KNOWN-size Cluster with a Timestamp and blocks.
-func clusterElement(clusterTS uint64, blocks ...[]byte) []byte {
-	payload := elem(matroska.IDTimestamp, encodeUint(clusterTS))
-	for _, b := range blocks {
-		payload = append(payload, b...)
-	}
-	return elem(matroska.IDCluster, payload)
+// cluster writes a KNOWN-size Cluster with a Timestamp and blocks.
+func (s *stream) cluster(clusterTS uint64, blocks ...block) {
+	s.master(matroska.IDCluster, func() {
+		s.uint(matroska.IDTimestamp, clusterTS)
+		for _, b := range blocks {
+			s.simpleBlock(b)
+		}
+	})
 }
 
 // ---- Fragment builder ----
@@ -267,23 +257,24 @@ type fragOpts struct {
 	timestampScale uint64 // 0 => defaultTimestampScale
 	audioParams    bool
 	clusterTS      uint64
-	blocks         [][]byte
+	blocks         []block
 }
 
-// fragment builds one EBML-header + unknown-size Segment fragment.
-func fragment(o fragOpts) []byte {
-	seg := []byte{}
-	if o.includeInfo {
-		scale := o.timestampScale
-		if scale == 0 {
-			scale = defaultTimestampScale
+// fragment writes one EBML-header + unknown-size Segment fragment.
+func (s *stream) fragment(o fragOpts) {
+	s.ebmlHeader()
+	s.unknownMaster(matroska.IDSegment, func() {
+		if o.includeInfo {
+			scale := o.timestampScale
+			if scale == 0 {
+				scale = defaultTimestampScale
+			}
+			s.info(segmentUID(o.uidSeed), scale)
 		}
-		seg = append(seg, infoElement(segmentUID(o.uidSeed), scale)...)
-	}
-	seg = append(seg, tracksElement(o.audioParams)...)
-	if !o.omitTags {
-		seg = append(seg, tagsElement(o.producerTS, o.fragmentNumber, o.contactID)...)
-	}
-	seg = append(seg, clusterElement(o.clusterTS, o.blocks...)...)
-	return concat(ebmlHeader(), elemUnknown(matroska.IDSegment, seg))
+		s.tracks(o.audioParams)
+		if !o.omitTags {
+			s.tags(o.producerTS, o.fragmentNumber, o.contactID)
+		}
+		s.cluster(o.clusterTS, o.blocks...)
+	})
 }

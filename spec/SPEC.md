@@ -1,9 +1,84 @@
 # Streaming EBML Cursor Specification
 
-This document specifies the portable core of `ebml-reader`. It is a behavioral
+This document specifies the portable core of `ebml`. It is a behavioral
 contract for incremental EBML readers; it is not a document-model or retention
 API. The core consists of a cursor with events and flow control, plus a separate
 element registry and classifier.
+
+## Relation to existing models
+
+The reading core is a **pull cursor**, equivalent to the cursor flavour of StAX,
+but in its asynchronous form: input is pushed as chunks, and the cursor reports
+need-more-data instead of blocking on a stream. Its event and handler layer is
+shaped like SAX, but adds pruning authority that SAX lacks: on the header, the
+handler decides whether to descend and whether a leaf payload is delivered. The
+retained tree in the optional layer plays the DOM role and is outside this
+contract.
+
+The analogy is inexact in several EBML-specific ways. Explicit element sizes
+make extents first-class, so skipping a subtree is arithmetic rather than a
+scan for a matching end tag. The end of a known-size master is therefore
+**computed**, not discovered, and is observable before any enclosing
+unknown-size master closes. Unknown-size masters have no XML analogue and need
+the structural-termination rule. Element naming and value typing live in a
+separate registry rather than in the parser. Finally, split invariance is
+normative here because an implementation does not own the read loop.
+
+## Writing
+
+A conforming writer emits an element ID VINT, a size VINT, and the payload in
+that order. An element ID is encoded in its complete 1-to-4-byte VINT form.
+The size VINT uses 1-to-8 bytes; its value bits encode the payload length, and a
+size may use any width from its minimal form up to the maximum width when the
+value fits. A non-minimal width is legal, allowing a size to be reserved and
+patched later without shifting the payload.
+
+The all-ones size VINT is the unknown-size marker. It is valid for masters only.
+The resulting master has no declared end: it terminates structurally when a
+consumer-supplied boundary rule identifies an element that cannot be its child,
+or at end of input during finalization.
+
+Value payload encodings are the exact inverses of the reading side: unsigned
+integers use big-endian binary representations, and signed integers use
+big-endian two's-complement representations; floats use
+IEEE 754 binary32 or binary64; ASCII strings and UTF-8 strings contain their
+encoded characters without a terminator; dates are signed nanoseconds relative
+to `2001-01-01T00:00:00 UTC`; and binary values are opaque bytes. The writer
+does not infer any of these meanings from an element ID: the caller supplies
+the value type.
+
+Because the inverse is exact, a value a reader could not return unchanged is
+refused rather than encoded. A string value must therefore not contain a NUL
+byte: a reader stops at the first NUL, since EBML permits a string payload to be
+zero-padded, so a writer rejects a string carrying one. Trailing zero padding is
+a property of a payload, not of a value, and arbitrary bytes are a binary value.
+A date is refused for the same reason once it leaves the range a signed 64-bit
+nanosecond count reaches — roughly ±292 years around the epoch. Clamping such a
+date to the nearest representable instant would read back as a different date,
+so a writer reports it instead. An implementation must compute the offset in a
+way that detects the overflow: a duration type that saturates at its own bounds
+silently produces the wrong instant.
+
+A conforming writer should offer three size strategies:
+
+* **Buffer then size:** retain a master's payload, then emit its exact size.
+  This works with any sink but uses memory proportional to the subtree.
+* **Reserve and patch:** emit a fixed-width size placeholder, stream the
+  payload, then patch the size. The sink must support positional patching
+  (unless an enclosing buffer supplies it), and the final size must fit the
+  reserved width.
+* **Unknown size:** emit the unknown-size marker and stream the payload without
+  patching. This requires a master and a consumer that implements the
+  structural-termination rule.
+
+These strategies are alternatives for masters; a complete leaf payload may use
+the minimal size or an explicitly selected legal width. A reading-only
+implementation need not provide writing.
+
+> **Go mapping (non-normative):** package `writer` provides `Writer`,
+> `StartMaster`, `EndMaster`, `Buffered`, `Reserved`, `UnknownSize`, and the
+> value methods `Uint`, `Int`, `Float`, `String`, `UTF8`, `Date`, `Binary`, and
+> `Leaf`. Package `ext/tree` provides `Marshal` and `MarshalBytes`.
 
 ## 1. Data model
 
@@ -260,6 +335,14 @@ are `one_byte` (one byte per chunk), `fibonacci` (Fibonacci-sized chunks), and
 
 An implementation conforms when it reproduces every committed golden JSONL file
 byte-for-byte for every committed fixture under every split pattern.
+
+### Round trip
+
+For every committed fixture, a port that implements writing must parse the
+fixture into its retained model and write it back byte-for-byte identically.
+This requirement also asserts that the retained model is lossless, including
+the original legal size-VINT width and the exact payload bytes. Reading-only
+ports remain conformant without implementing this requirement.
 
 The packages under `go/ext/` are outside this contract. The retained tree and
 the per-Cluster assembler are Go-only convenience layers and are not required

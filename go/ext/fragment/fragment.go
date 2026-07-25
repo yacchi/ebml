@@ -47,9 +47,9 @@ package fragment
 import (
 	"time"
 
-	"github.com/yacchi/ebml-reader/ext/tree"
-	"github.com/yacchi/ebml-reader/matroska"
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/ext/tree"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
 )
 
 // DefaultTimestampScale is the Matroska default TimestampScale in nanoseconds,

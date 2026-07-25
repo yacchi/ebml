@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/parser"
 )
 
 func TestRegistryConstantsAreConsistent(t *testing.T) {

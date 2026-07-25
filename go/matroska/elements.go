@@ -3,7 +3,7 @@ package matroska
 import (
 	"fmt"
 
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/parser"
 )
 
 // ValueType identifies the EBML value representation of a Matroska element.

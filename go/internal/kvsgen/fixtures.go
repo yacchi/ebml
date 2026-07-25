@@ -3,7 +3,7 @@ package kvsgen
 import (
 	"fmt"
 
-	"github.com/yacchi/ebml-reader/matroska"
+	"github.com/yacchi/ebml/matroska"
 )
 
 // Facts records structural expectations for a fixture, for the manifest
@@ -57,19 +57,19 @@ func BuildAll() []Fixture {
 // that reads the relative timecode as unsigned, cannot reproduce these times.
 func scaledTimestamps() Fixture {
 	const scale = 100000
-	data := concat(
-		ebmlHeader(),
-		elemUnknown(matroska.IDSegment, concat(
-			infoElement(segmentUID(0xA0), scale),
-			tracksElement(false),
-			tagsElement("8000000000.000", "scaled-0", fakeContactA),
-			clusterElement(1000,
-				simpleBlock(-20, pcm(24, 0x11)),
-				simpleBlock(0, pcm(24, 0x12)),
-				simpleBlock(20, pcm(24, 0x13)),
-			),
-		)),
-	)
+	s := newStream()
+	s.ebmlHeader()
+	s.unknownMaster(matroska.IDSegment, func() {
+		s.info(segmentUID(0xA0), scale)
+		s.tracks(false)
+		s.tags("8000000000.000", "scaled-0", fakeContactA)
+		s.cluster(1000,
+			block{-20, pcm(24, 0x11)},
+			block{0, pcm(24, 0x12)},
+			block{20, pcm(24, 0x13)},
+		)
+	})
+	data := s.bytes()
 	return Fixture{
 		Name: "scaled_timestamps",
 		Comment: joinLines(
@@ -105,20 +105,23 @@ func scaledTimestamps() Fixture {
 // leaf whose bytes stay complete; registering it as a master is what makes those
 // children nest as elements of their own.
 func unknownElements() Fixture {
-	data := concat(
-		ebmlHeader(),
-		elemUnknown(matroska.IDSegment, concat(
-			infoElement(segmentUID(0xB0), defaultTimestampScale),
-			elem(idUnregisteredLeaf, encodeUint(42)),
-			elem(idUnregisteredMaster, concat(
-				elem(matroska.IDName, []byte("vendor-box")),
-				elem(matroska.IDTrackNumber, encodeUint(7)),
-			)),
-			tracksElement(false),
-			tagsElement("9000000000.000", "unknown-0", fakeContactA),
-			clusterElement(0, simpleBlock(0, pcm(24, 0x21))),
-		)),
-	)
+	s := newStream()
+	s.ebmlHeader()
+	s.unknownMaster(matroska.IDSegment, func() {
+		s.info(segmentUID(0xB0), defaultTimestampScale)
+		s.uint(idUnregisteredLeaf, 42)
+		// The writer knows no element either, so calling it a master is the
+		// caller's decision — exactly the shape a consumer's registry would have
+		// to teach the reader about.
+		s.master(idUnregisteredMaster, func() {
+			s.str(matroska.IDName, "vendor-box")
+			s.uint(matroska.IDTrackNumber, 7)
+		})
+		s.tracks(false)
+		s.tags("9000000000.000", "unknown-0", fakeContactA)
+		s.cluster(0, block{0, pcm(24, 0x21)})
+	})
+	data := s.bytes()
 	return Fixture{
 		Name: "unknown_elements",
 		Comment: joinLines(
@@ -149,22 +152,22 @@ func unknownElements() Fixture {
 }
 
 func multiCluster() Fixture {
-	data := concat(
-		ebmlHeader(),
-		elemUnknown(matroska.IDSegment, concat(
-			infoElement(segmentUID(0x20), defaultTimestampScale),
-			tracksElement(false),
-			tagsElement("1500000000.000", "multi-cluster", fakeContactA),
-			clusterElement(0,
-				simpleBlock(0, pcm(24, 0x61)),
-				simpleBlock(10, pcm(24, 0x62)),
-			),
-			clusterElement(1024,
-				simpleBlock(0, pcm(24, 0x71)),
-				simpleBlock(10, pcm(24, 0x72)),
-			),
-		)),
-	)
+	s := newStream()
+	s.ebmlHeader()
+	s.unknownMaster(matroska.IDSegment, func() {
+		s.info(segmentUID(0x20), defaultTimestampScale)
+		s.tracks(false)
+		s.tags("1500000000.000", "multi-cluster", fakeContactA)
+		s.cluster(0,
+			block{0, pcm(24, 0x61)},
+			block{10, pcm(24, 0x62)},
+		)
+		s.cluster(1024,
+			block{0, pcm(24, 0x71)},
+			block{10, pcm(24, 0x72)},
+		)
+	})
+	data := s.bytes()
 	return Fixture{
 		Name: "multi_cluster",
 		Comment: joinLines(
@@ -192,7 +195,8 @@ func multiCluster() Fixture {
 }
 
 func topologyBasic() Fixture {
-	data := fragment(fragOpts{
+	s := newStream()
+	s.fragment(fragOpts{
 		producerTS:     "1000000000.000",
 		fragmentNumber: "91343852333181000000000000000000000000000000001",
 		contactID:      fakeContactA,
@@ -200,12 +204,13 @@ func topologyBasic() Fixture {
 		audioParams:    true,
 		uidSeed:        0x10,
 		clusterTS:      0,
-		blocks: [][]byte{
-			simpleBlock(0, pcm(32, 0x01)),
-			simpleBlock(10, pcm(32, 0x02)),
-			simpleBlock(20, pcm(32, 0x03)),
+		blocks: []block{
+			{0, pcm(32, 0x01)},
+			{10, pcm(32, 0x02)},
+			{20, pcm(32, 0x03)},
 		},
 	})
+	data := s.bytes()
 	return Fixture{
 		Name: "topology_basic",
 		Comment: joinLines(
@@ -235,23 +240,24 @@ func topologyBasic() Fixture {
 }
 
 func multiSegment() Fixture {
-	var data []byte
 	tss := []string{"1000000000.000", "1000000001.024", "1000000002.048", "1000000003.072"}
 	fns := []string{"...001", "...002", "...003", "...004"}
+	s := newStream()
 	for i := 0; i < 4; i++ {
-		data = append(data, fragment(fragOpts{
+		s.fragment(fragOpts{
 			producerTS:     tss[i],
 			fragmentNumber: fmt.Sprintf("9134385233318100000000000000000000000000000000%d", i+1),
 			contactID:      fakeContactA,
 			includeInfo:    i == 0,
 			uidSeed:        0x30,
 			clusterTS:      uint64(i) * 1024,
-			blocks: [][]byte{
-				simpleBlock(0, pcm(32, byte(0x10+i))),
-				simpleBlock(10, pcm(32, byte(0x20+i))),
+			blocks: []block{
+				{0, pcm(32, byte(0x10+i))},
+				{10, pcm(32, byte(0x20+i))},
 			},
-		})...)
+		})
 	}
+	data := s.bytes()
 	return Fixture{
 		Name: "multi_segment",
 		Comment: joinLines(
@@ -279,21 +285,22 @@ func multiSegment() Fixture {
 }
 
 func taglessSingle() Fixture {
-	var data []byte
+	s := newStream()
 	// fragment 0: normal; fragment 1: NO Tags element at all; fragment 2: normal.
-	data = append(data, fragment(fragOpts{
+	s.fragment(fragOpts{
 		producerTS: "2000000000.000", fragmentNumber: "tag-0", contactID: fakeContactA,
 		includeInfo: true, uidSeed: 0x40, clusterTS: 0,
-		blocks: [][]byte{simpleBlock(0, pcm(24, 0x01))},
-	})...)
-	data = append(data, fragment(fragOpts{
+		blocks: []block{{0, pcm(24, 0x01)}},
+	})
+	s.fragment(fragOpts{
 		producerTS: "2000000001.024", fragmentNumber: "tag-1", omitTags: true,
-		clusterTS: 1024, blocks: [][]byte{simpleBlock(0, pcm(24, 0x02))},
-	})...)
-	data = append(data, fragment(fragOpts{
+		clusterTS: 1024, blocks: []block{{0, pcm(24, 0x02)}},
+	})
+	s.fragment(fragOpts{
 		producerTS: "2000000002.048", fragmentNumber: "tag-2", contactID: fakeContactA,
-		clusterTS: 2048, blocks: [][]byte{simpleBlock(0, pcm(24, 0x03))},
-	})...)
+		clusterTS: 2048, blocks: []block{{0, pcm(24, 0x03)}},
+	})
+	data := s.bytes()
 	return Fixture{
 		Name: "tagless_single",
 		Comment: joinLines(
@@ -321,26 +328,27 @@ func taglessSingle() Fixture {
 }
 
 func taglessConsecutive() Fixture {
-	var data []byte
+	s := newStream()
 	// fragment 0: normal; fragments 1 and 2: tagless; fragment 3: normal.
-	data = append(data, fragment(fragOpts{
+	s.fragment(fragOpts{
 		producerTS: "3000000000.000", fragmentNumber: "c-0", contactID: fakeContactA,
-		includeInfo: true, uidSeed: 0x50, clusterTS: 0, blocks: [][]byte{simpleBlock(0, pcm(24, 0x01))},
-	})...)
-	data = append(data, fragment(fragOpts{
+		includeInfo: true, uidSeed: 0x50, clusterTS: 0, blocks: []block{{0, pcm(24, 0x01)}},
+	})
+	s.fragment(fragOpts{
 		producerTS: "3000000001.024", fragmentNumber: "c-1", omitTags: true,
 		includeInfo: true, uidSeed: 0x50,
-		clusterTS: 1024, blocks: [][]byte{simpleBlock(0, pcm(24, 0x02))},
-	})...)
-	data = append(data, fragment(fragOpts{
+		clusterTS: 1024, blocks: []block{{0, pcm(24, 0x02)}},
+	})
+	s.fragment(fragOpts{
 		producerTS: "3000000002.048", fragmentNumber: "c-2", omitTags: true,
 		includeInfo: true, uidSeed: 0x50,
-		clusterTS: 2048, blocks: [][]byte{simpleBlock(0, pcm(24, 0x03))},
-	})...)
-	data = append(data, fragment(fragOpts{
+		clusterTS: 2048, blocks: []block{{0, pcm(24, 0x03)}},
+	})
+	s.fragment(fragOpts{
 		producerTS: "3000000003.072", fragmentNumber: "c-3", contactID: fakeContactA,
-		clusterTS: 3072, blocks: [][]byte{simpleBlock(0, pcm(24, 0x04))},
-	})...)
+		clusterTS: 3072, blocks: []block{{0, pcm(24, 0x04)}},
+	})
+	data := s.bytes()
 	return Fixture{
 		Name: "tagless_consecutive",
 		Comment: joinLines(
@@ -366,17 +374,18 @@ func taglessConsecutive() Fixture {
 }
 
 func filterMismatch() Fixture {
-	var data []byte
 	// fragments 0,1 = ContactA; fragment 2,3 switch to ContactB (transfer-style).
 	ids := []string{fakeContactA, fakeContactA, fakeContactB, fakeContactB}
 	tss := []string{"4000000000.000", "4000000001.024", "4000000002.048", "4000000003.072"}
+	s := newStream()
 	for i := 0; i < 4; i++ {
-		data = append(data, fragment(fragOpts{
+		s.fragment(fragOpts{
 			producerTS: tss[i], fragmentNumber: fmt.Sprintf("fm-%d", i), contactID: ids[i],
 			includeInfo: i == 0, uidSeed: 0x60, clusterTS: uint64(i) * 1024,
-			blocks: [][]byte{simpleBlock(0, pcm(24, byte(0x30+i)))},
-		})...)
+			blocks: []block{{0, pcm(24, byte(0x30+i))}},
+		})
 	}
+	data := s.bytes()
 	return Fixture{
 		Name: "filter_mismatch",
 		Comment: joinLines(
@@ -404,7 +413,6 @@ func filterMismatch() Fixture {
 }
 
 func gap() Fixture {
-	var data []byte
 	// FragmentNumbers/timecodes jump: 0,1, (missing 2), 4 — a dropped fragment.
 	specs := []struct {
 		fn string
@@ -415,13 +423,15 @@ func gap() Fixture {
 		{"gap-1", "5000000001.024", 1024},
 		{"gap-4", "5000000004.096", 4096}, // fragments 2,3 dropped
 	}
-	for i, s := range specs {
-		data = append(data, fragment(fragOpts{
-			producerTS: s.ts, fragmentNumber: s.fn, contactID: fakeContactA,
-			includeInfo: i == 0, uidSeed: 0x70, clusterTS: s.tc,
-			blocks: [][]byte{simpleBlock(0, pcm(24, byte(0x50+i)))},
-		})...)
+	s := newStream()
+	for i, spec := range specs {
+		s.fragment(fragOpts{
+			producerTS: spec.ts, fragmentNumber: spec.fn, contactID: fakeContactA,
+			includeInfo: i == 0, uidSeed: 0x70, clusterTS: spec.tc,
+			blocks: []block{{0, pcm(24, byte(0x50+i))}},
+		})
 	}
+	data := s.bytes()
 	return Fixture{
 		Name: "gap",
 		Comment: joinLines(
@@ -450,15 +460,17 @@ func gap() Fixture {
 func falseEBMLMagicInPCM() Fixture {
 	// One fragment; a SimpleBlock whose PCM payload embeds 0x1A 0x45 0xDF 0xA3.
 	magicPCM := pcmWithEBMLMagic(48)
-	data := fragment(fragOpts{
+	s := newStream()
+	s.fragment(fragOpts{
 		producerTS: "6000000000.000", fragmentNumber: "magic-0", contactID: fakeContactA,
 		includeInfo: true, uidSeed: 0x80, clusterTS: 0,
-		blocks: [][]byte{
-			simpleBlock(0, pcm(24, 0x01)),
-			simpleBlock(10, magicPCM), // contains the EBML magic bytes
-			simpleBlock(20, pcm(24, 0x03)),
+		blocks: []block{
+			{0, pcm(24, 0x01)},
+			{10, magicPCM}, // contains the EBML magic bytes
+			{20, pcm(24, 0x03)},
 		},
 	})
+	data := s.bytes()
 	return Fixture{
 		Name: "false_ebml_magic_in_pcm",
 		Comment: joinLines(
@@ -488,20 +500,21 @@ func falseEBMLMagicInPCM() Fixture {
 }
 
 func tailLastFragment() Fixture {
-	var data []byte
 	// Two fragments; the LAST has no following Segment. Its Cluster completes and
 	// is observable via end_master before any EOF; the Segment closes at EOF only.
-	data = append(data, fragment(fragOpts{
+	s := newStream()
+	s.fragment(fragOpts{
 		producerTS: "7000000000.000", fragmentNumber: "tail-0", contactID: fakeContactA,
-		includeInfo: true, uidSeed: 0x90, clusterTS: 0, blocks: [][]byte{simpleBlock(0, pcm(24, 0x01))},
-	})...)
-	data = append(data, fragment(fragOpts{
+		includeInfo: true, uidSeed: 0x90, clusterTS: 0, blocks: []block{{0, pcm(24, 0x01)}},
+	})
+	s.fragment(fragOpts{
 		producerTS: "7000000001.024", fragmentNumber: "tail-1", contactID: fakeContactA,
-		clusterTS: 1024, blocks: [][]byte{
-			simpleBlock(0, pcm(24, 0x02)),
-			simpleBlock(10, pcm(24, 0x03)),
+		clusterTS: 1024, blocks: []block{
+			{0, pcm(24, 0x02)},
+			{10, pcm(24, 0x03)},
 		},
-	})...)
+	})
+	data := s.bytes()
 	return Fixture{
 		Name: "tail_last_fragment",
 		Comment: joinLines(

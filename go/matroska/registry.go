@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/parser"
 )
 
 // Errors reported by Registry.Register and Registry.Override. They are sentinels

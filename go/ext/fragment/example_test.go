@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/yacchi/ebml-reader/ext/fragment"
-	"github.com/yacchi/ebml-reader/matroska"
+	"github.com/yacchi/ebml/ext/fragment"
+	"github.com/yacchi/ebml/matroska"
 )
 
 // Example_streamingAssembly shows the whole loop: construct an assembler, push

@@ -20,8 +20,8 @@ import (
 	"encoding/json"
 	"math/rand"
 
-	"github.com/yacchi/ebml-reader/matroska"
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
 )
 
 // Event mirrors the golden JSONL schema (golden/tiny.jsonl).

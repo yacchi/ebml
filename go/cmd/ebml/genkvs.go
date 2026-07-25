@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/yacchi/ebml-reader/internal/ebmltrace"
-	"github.com/yacchi/ebml-reader/internal/kvsgen"
-	"github.com/yacchi/ebml-reader/matroska"
+	"github.com/yacchi/ebml/internal/ebmltrace"
+	"github.com/yacchi/ebml/internal/kvsgen"
+	"github.com/yacchi/ebml/matroska"
 )
 
 // generateKVS writes the synthetic KVS fixture corpus under root:
@@ -37,7 +37,7 @@ func generateKVS(root string, log io.Writer) error {
 
 	fixtures := kvsgen.BuildAll()
 	manifest := map[string]any{
-		"generated_by": "go run ./cmd/ebml-reader genkvs",
+		"generated_by": "go run ./cmd/ebml genkvs",
 		"data_safety":  "100% synthetic: fake UUID ContactId/InstanceId, counter-pattern PCM, synthetic tokens. No real Amazon Connect capture data.",
 		"schema":       "each .ebml.hex is a synthetic MKV stream; each golden/kvs/<name>.jsonl is the cursor event log (KVS classifier) and is split-invariant.",
 		"fixtures":     map[string]kvsgen.Facts{},
@@ -108,7 +108,7 @@ func genkvsCommand(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	root := fs.String("root", "..", "repository root (parent of fixtures/ and golden/)")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: ebml-reader genkvs [flags]")
+		fmt.Fprintln(stderr, "Usage: ebml genkvs [flags]")
 		fmt.Fprintln(stderr, "  Regenerate fixtures/kvs, golden/kvs and README.json. Run from the go/ directory.")
 		fs.PrintDefaults()
 	}
@@ -116,7 +116,7 @@ func genkvsCommand(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if err := generateKVS(*root, stdout); err != nil {
-		fmt.Fprintf(stderr, "ebml-reader: %v\n", err)
+		fmt.Fprintf(stderr, "ebml: %v\n", err)
 		return 1
 	}
 	return 0

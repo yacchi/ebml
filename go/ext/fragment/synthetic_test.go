@@ -6,143 +6,97 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yacchi/ebml-reader/ext/fragment"
-	"github.com/yacchi/ebml-reader/matroska"
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/ext/fragment"
+	"github.com/yacchi/ebml/internal/ebmltest"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
 )
 
-// ---- Minimal, self-contained EBML byte encoders. ----
+// ---- Self-contained stream shapes, built through internal/ebmltest. ----
 //
-// These are deliberately NOT shared with internal/kvsgen: streams built here are
-// independent of the generator, so a bug shared between the generator and the
-// assembler cannot hide behind green tests. They also let one test state exactly
+// The SHAPES here are deliberately NOT shared with internal/kvsgen: streams built
+// here are independent of the generator, so a bug shared between the generator and
+// the assembler cannot hide behind green tests. They also let one test state exactly
 // which elements are present and which are absent -- the cases a fixture corpus
-// would need a fixture each for.
+// would need a fixture each for. The ENCODING, by contrast, is package writer's, the
+// library's only EBML encoder (ebmltest is a thin shaping layer over it), so no test
+// carries an encoder of its own -- not even for the unknown-size Segment, which is
+// the writer's UnknownSize strategy rather than a hand-assembled header.
 
-func synID(id parser.ElementID) []byte {
-	b := []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)}
-	start := 0
-	for start < 3 && b[start] == 0 {
-		start++
-	}
-	return append([]byte(nil), b[start:]...)
-}
-
-func synSize(n uint64) []byte {
-	for l := 1; l <= 8; l++ {
-		max := uint64(1)<<(7*uint(l)) - 1
-		if n < max {
-			v := n | (uint64(1) << (7 * uint(l)))
-			out := make([]byte, l)
-			for i := l - 1; i >= 0; i-- {
-				out[i] = byte(v)
-				v >>= 8
-			}
-			return out
-		}
-	}
-	panic("synthetic: size too large to encode")
-}
-
-func synUint(v uint64) []byte {
-	if v == 0 {
-		return []byte{0x00}
-	}
-	n := 0
-	for x := v; x > 0; x >>= 8 {
-		n++
-	}
-	out := make([]byte, n)
-	for i := n - 1; i >= 0; i-- {
-		out[i] = byte(v)
-		v >>= 8
-	}
-	return out
-}
-
-func synElem(id parser.ElementID, payload []byte) []byte {
-	out := synID(id)
-	out = append(out, synSize(uint64(len(payload)))...)
-	return append(out, payload...)
-}
-
-// synUnknownElem encodes an element with the 8-byte unknown-size VINT, which is
-// what a real KVS Segment uses.
-func synUnknownElem(id parser.ElementID, payload []byte) []byte {
-	out := synID(id)
-	out = append(out, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF)
-	return append(out, payload...)
-}
-
-func synConcat(parts ...[]byte) []byte {
-	var out []byte
-	for _, p := range parts {
-		out = append(out, p...)
-	}
-	return out
-}
-
-func synEBMLHeader() []byte {
-	return synElem(matroska.IDEBML, synConcat(
-		synElem(matroska.IDEBMLVersion, synUint(1)),
-		synElem(matroska.IDEBMLReadVersion, synUint(1)),
-		synElem(matroska.IDDocType, []byte("matroska")),
-	))
+func synEBMLHeader() ebmltest.Node {
+	return ebmltest.Master(matroska.IDEBML,
+		ebmltest.Uint(matroska.IDEBMLVersion, 1),
+		ebmltest.Uint(matroska.IDEBMLReadVersion, 1),
+		ebmltest.String(matroska.IDDocType, "matroska"),
+	)
 }
 
 // synTrackEntry builds one TrackEntry. Passing name == "" OMITS the Name element
 // entirely, as opposed to emitting an empty one, so the element-absent path is
 // testable distinctly from an empty-but-present element.
-func synTrackEntry(number uint64, name string) []byte {
-	payload := synConcat(
-		synElem(matroska.IDTrackNumber, synUint(number)),
-		synElem(matroska.IDTrackType, synUint(2)),
-		synElem(matroska.IDCodecID, []byte("A_PCM/INT/LIT")),
-	)
-	if name != "" {
-		payload = append(payload, synElem(matroska.IDName, []byte(name))...)
+func synTrackEntry(number uint64, name string) ebmltest.Node {
+	children := []ebmltest.Node{
+		ebmltest.Uint(matroska.IDTrackNumber, number),
+		ebmltest.Uint(matroska.IDTrackType, 2),
+		ebmltest.String(matroska.IDCodecID, "A_PCM/INT/LIT"),
 	}
-	return synElem(matroska.IDTrackEntry, payload)
+	if name != "" {
+		children = append(children, ebmltest.UTF8(matroska.IDName, name))
+	}
+	return ebmltest.Master(matroska.IDTrackEntry, children...)
 }
 
-func synTracks(entries ...[]byte) []byte {
-	return synElem(matroska.IDTracks, synConcat(entries...))
+func synTracks(entries ...ebmltest.Node) ebmltest.Node {
+	return ebmltest.Master(matroska.IDTracks, entries...)
 }
 
-func synSimpleBlock(trackNumber byte, timecode int16, audio []byte) []byte {
+func synSimpleBlock(trackNumber byte, timecode int16, audio []byte) ebmltest.Node {
 	content := []byte{0x80 | trackNumber}
 	content = append(content, byte(uint16(timecode)>>8), byte(uint16(timecode)))
 	content = append(content, 0x00) // flags
 	content = append(content, audio...)
-	return synElem(matroska.IDSimpleBlock, content)
+	return ebmltest.Leaf(matroska.IDSimpleBlock, content)
 }
 
-func synCluster(clusterTS uint64, blocks ...[]byte) []byte {
-	payload := synElem(matroska.IDTimestamp, synUint(clusterTS))
-	for _, b := range blocks {
-		payload = append(payload, b...)
-	}
-	return synElem(matroska.IDCluster, payload)
+func synCluster(clusterTS uint64, blocks ...ebmltest.Node) ebmltest.Node {
+	children := append([]ebmltest.Node{ebmltest.Uint(matroska.IDTimestamp, clusterTS)}, blocks...)
+	return ebmltest.Master(matroska.IDCluster, children...)
 }
 
-// synInfo builds an Info element from arbitrary pre-built children, so a test
-// selects exactly which of SegmentUUID/TimestampScale are present.
-func synInfo(children ...[]byte) []byte {
-	return synElem(matroska.IDInfo, synConcat(children...))
+// synInfo builds an Info element from arbitrary children, so a test selects exactly
+// which of SegmentUUID/TimestampScale are present.
+func synInfo(children ...ebmltest.Node) ebmltest.Node {
+	return ebmltest.Master(matroska.IDInfo, children...)
 }
 
-func synSegmentUUID(uid []byte) []byte {
-	return synElem(matroska.IDSegmentUUID, uid)
+func synSegmentUUID(uid []byte) ebmltest.Node {
+	return ebmltest.Leaf(matroska.IDSegmentUUID, uid)
 }
 
-func synTimestampScale(scale uint64) []byte {
-	return synElem(matroska.IDTimestampScale, synUint(scale))
+func synTimestampScale(scale uint64) ebmltest.Node {
+	return ebmltest.Uint(matroska.IDTimestampScale, scale)
 }
 
-// synFragment wraps a Segment body as a full EBML-header + unknown-size Segment
-// unit, matching a real KVS fragment.
-func synFragment(segmentBody []byte) []byte {
-	return synConcat(synEBMLHeader(), synUnknownElem(matroska.IDSegment, segmentBody))
+// synTags builds a Tags element holding one Tag with a single SimpleTag, which is
+// all these tests need to observe metadata attribution.
+func synTags(name, value string) ebmltest.Node {
+	return ebmltest.Master(matroska.IDTags,
+		ebmltest.Master(matroska.IDTag,
+			ebmltest.Master(matroska.IDSimpleTag,
+				ebmltest.UTF8(matroska.IDTagName, name),
+				ebmltest.UTF8(matroska.IDTagString, value),
+			),
+		),
+	)
+}
+
+// synFragment encodes the given Segment children as a full EBML-header +
+// unknown-size Segment unit, matching a real KVS fragment.
+func synFragment(segmentChildren ...ebmltest.Node) []byte {
+	return ebmltest.Encode(
+		synEBMLHeader(),
+		ebmltest.UnknownMaster(matroska.IDSegment, segmentChildren...),
+	)
 }
 
 // runWhole feeds a byte slice in a single Feed call plus Finalize. These tests are
@@ -156,11 +110,11 @@ func runWhole(t *testing.T, raw []byte, opts ...fragment.Option) []*fragment.Fra
 // TestInfoAbsent covers the default path: a Segment with NO Info element at all
 // falls back to the spec TimestampScale and has no SegmentUUID to report.
 func TestInfoAbsent(t *testing.T) {
-	seg := synConcat(
+	raw := synFragment(
 		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
 		synCluster(0, synSimpleBlock(1, 0, []byte{0x01, 0x02})),
 	)
-	frags := runWhole(t, synFragment(seg))
+	frags := runWhole(t, raw)
 	if len(frags) != 1 {
 		t.Fatalf("want 1 fragment, got %d", len(frags))
 	}
@@ -181,12 +135,12 @@ func TestInfoAbsent(t *testing.T) {
 // IS present is readable.
 func TestInfoPresentTimestampScaleAbsent(t *testing.T) {
 	uid := []byte{0xAA, 0xBB, 0xCC, 0xDD}
-	seg := synConcat(
+	raw := synFragment(
 		synInfo(synSegmentUUID(uid)), // no TimestampScale child
 		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
 		synCluster(0, synSimpleBlock(1, 0, []byte{0x01, 0x02})),
 	)
-	f := runWhole(t, synFragment(seg))[0]
+	f := runWhole(t, raw)[0]
 	if got := f.Segment.Find(matroska.IDInfo, matroska.IDSegmentUUID).Bytes(); !reflect.DeepEqual(got, uid) {
 		t.Fatalf("SegmentUUID = %x, want %x", got, uid)
 	}
@@ -204,21 +158,21 @@ func TestNoStateLeaksAcrossSegments(t *testing.T) {
 	uidA := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
 	uidC := []byte{0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8}
 
-	seg1 := synConcat(
+	frag1 := synFragment(
 		synInfo(synSegmentUUID(uidA), synTimestampScale(1_000_000)),
 		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
 		synCluster(0, synSimpleBlock(1, 0, []byte{0x01})),
 	)
-	seg2 := synConcat( // deliberately NO Info element
+	frag2 := synFragment( // deliberately NO Info element
 		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
 		synCluster(0, synSimpleBlock(1, 0, []byte{0x02})),
 	)
-	seg3 := synConcat(
+	frag3 := synFragment(
 		synInfo(synSegmentUUID(uidC), synTimestampScale(2_000_000)),
 		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
 		synCluster(0, synSimpleBlock(1, 0, []byte{0x03})),
 	)
-	raw := synConcat(synFragment(seg1), synFragment(seg2), synFragment(seg3))
+	raw := ebmltest.Concat(frag1, frag2, frag3)
 
 	// Every chunking, because closing one Segment on the next fragment's header is
 	// exactly where a boundary could be missed.
@@ -266,11 +220,11 @@ func TestNoStateLeaksAcrossSegments(t *testing.T) {
 // TestTrackNameAbsent checks a TrackEntry with no Name element at all: the lookup
 // misses instead of matching an empty name, and nothing panics.
 func TestTrackNameAbsent(t *testing.T) {
-	seg := synConcat(
+	raw := synFragment(
 		synTracks(synTrackEntry(1, "")), // "" => Name element omitted entirely
 		synCluster(0, synSimpleBlock(1, 0, []byte{0x01})),
 	)
-	f := runWhole(t, synFragment(seg))[0]
+	f := runWhole(t, raw)[0]
 	tracks := f.Tracks()
 	if len(tracks) != 1 {
 		t.Fatalf("want 1 track, got %d", len(tracks))
@@ -293,12 +247,12 @@ func TestBinaryPayloadIsNotStringMangled(t *testing.T) {
 	// 0x00 (would truncate a C string), 0xFF/0x80/0xC0 (invalid standalone UTF-8
 	// lead/continuation bytes), plus a plain ASCII byte for contrast.
 	uid := []byte{0x00, 0xFF, 0x80, 0xC0, 0x41, 0x00, 0xFE}
-	seg := synConcat(
+	raw := synFragment(
 		synInfo(synSegmentUUID(uid), synTimestampScale(1_000_000)),
 		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
 		synCluster(0, synSimpleBlock(1, 0, []byte{0x01})),
 	)
-	f := runWhole(t, synFragment(seg))[0]
+	f := runWhole(t, raw)[0]
 	got := f.Value(matroska.IDSegmentUUID).Bytes()
 	if len(got) != len(uid) {
 		t.Fatalf("SegmentUUID length = %d, want %d (truncated? %x vs %x)", len(got), len(uid), got, uid)
@@ -320,16 +274,14 @@ func TestBinaryPayloadIsNotStringMangled(t *testing.T) {
 func TestLateMetadataIsNotAttributedToAnEarlierFragment(t *testing.T) {
 	tracks := synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER"))
 	cluster1 := synCluster(0, synSimpleBlock(1, 0, []byte{0x01}))
-	lateTags := synElem(matroska.IDTags, synElem(matroska.IDTag, synElem(matroska.IDSimpleTag, synConcat(
-		synElem(matroska.IDTagName, []byte("ContactId")),
-		synElem(matroska.IDTagString, []byte("late")),
-	))))
+	lateTags := synTags("ContactId", "late")
 	cluster2 := synCluster(1024, synSimpleBlock(1, 0, []byte{0x02}))
-	raw := synFragment(synConcat(tracks, cluster1, lateTags, cluster2))
+	raw := synFragment(tracks, cluster1, lateTags, cluster2)
 
 	// Feed exactly up to the end of the first Cluster, then the rest.
 	const segmentHeaderLen = 4 + 8 // Segment ID plus the unknown-size VINT
-	cut := len(synEBMLHeader()) + segmentHeaderLen + len(tracks) + len(cluster1)
+	cut := len(ebmltest.Encode(synEBMLHeader())) + segmentHeaderLen +
+		len(ebmltest.Encode(tracks)) + len(ebmltest.Encode(cluster1))
 
 	a := fragment.New()
 	first, err := a.Feed(raw[:cut])
@@ -369,14 +321,14 @@ func TestLateMetadataIsNotAttributedToAnEarlierFragment(t *testing.T) {
 // error is reported, the fragments completed before it are still returned, and the
 // assembler does not silently carry on.
 func TestStructuralErrorIsTerminalWithoutResync(t *testing.T) {
-	good := synFragment(synConcat(
+	good := synFragment(
 		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
 		synCluster(0, synSimpleBlock(1, 0, []byte{0x01})),
-	))
+	)
 	// A leading 0x00 byte encodes a 9-byte element ID VINT, which exceeds the
 	// 4-byte maximum: the cursor cannot locate any element from there on.
 	garbage := []byte{0x00, 0x00, 0xFF, 0x13, 0x37}
-	raw := synConcat(good, garbage, good)
+	raw := ebmltest.Concat(good, garbage, good)
 
 	a := fragment.New()
 	frags, err := a.Feed(raw)
@@ -398,28 +350,22 @@ func TestStructuralErrorIsTerminalWithoutResync(t *testing.T) {
 // two Segments costs the bytes it occupies and nothing else -- the fragment after
 // it is assembled normally, and the loss is reported with a non-zero skipped count.
 func TestWithResyncRecoversFromSplicedGarbage(t *testing.T) {
-	first := synFragment(synConcat(
+	first := synFragment(
 		synInfo(synSegmentUUID([]byte{0xA1, 0xA2}), synTimestampScale(1_000_000)),
 		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
-		synElem(matroska.IDTags, synElem(matroska.IDTag, synElem(matroska.IDSimpleTag, synConcat(
-			synElem(matroska.IDTagName, []byte("ContactId")),
-			synElem(matroska.IDTagString, []byte("first")),
-		)))),
+		synTags("ContactId", "first"),
 		synCluster(0, synSimpleBlock(1, 0, []byte{0x01, 0x02})),
-	))
-	second := synFragment(synConcat(
+	)
+	second := synFragment(
 		synInfo(synSegmentUUID([]byte{0xB1, 0xB2}), synTimestampScale(2_000_000)),
 		synTracks(synTrackEntry(1, "AUDIO_TO_CUSTOMER")),
-		synElem(matroska.IDTags, synElem(matroska.IDTag, synElem(matroska.IDSimpleTag, synConcat(
-			synElem(matroska.IDTagName, []byte("ContactId")),
-			synElem(matroska.IDTagString, []byte("second")),
-		)))),
+		synTags("ContactId", "second"),
 		synCluster(7, synSimpleBlock(1, 0, []byte{0x03, 0x04})),
-	))
+	)
 	// Garbage whose first byte cannot begin an element: the cursor fails there,
 	// inside the first (still open) unknown-size Segment.
 	garbage := []byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77}
-	raw := synConcat(first, garbage, second)
+	raw := ebmltest.Concat(first, garbage, second)
 
 	type recovery struct {
 		offset  int64
@@ -505,7 +451,7 @@ func TestWithResyncRecoversFromSplicedGarbage(t *testing.T) {
 			if _, ok := after.TrackByName("AUDIO_TO_CUSTOMER"); !ok {
 				t.Fatal("fragment 1 lost its own track list")
 			}
-			if got, want := after.Segment.Offset, int64(len(first)+len(garbage)+len(synEBMLHeader())); got != want {
+			if got, want := after.Segment.Offset, int64(len(first)+len(garbage)+len(ebmltest.Encode(synEBMLHeader()))); got != want {
 				t.Fatalf("recovered Segment Offset = %d, want %d (offsets stay stream-absolute)", got, want)
 			}
 		})
@@ -516,11 +462,11 @@ func TestWithResyncRecoversFromSplicedGarbage(t *testing.T) {
 // ends inside garbage there is nothing left to resynchronize on, so Finalize
 // reports the error that started it rather than pretending the stream was clean.
 func TestWithResyncPendingAtEOF(t *testing.T) {
-	good := synFragment(synConcat(
+	good := synFragment(
 		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
 		synCluster(0, synSimpleBlock(1, 0, []byte{0x01})),
-	))
-	raw := synConcat(good, []byte{0x00, 0x99, 0x88})
+	)
+	raw := ebmltest.Concat(good, []byte{0x00, 0x99, 0x88})
 
 	var recoveries int
 	a := fragment.New(fragment.WithResync(func(int64, int64, error) { recoveries++ }))
@@ -550,8 +496,8 @@ func TestWithResyncPendingAtEOF(t *testing.T) {
 // ID, correct declared size, so the cursor reads it as one leaf and knows exactly
 // where the next element begins -- but whose CONTENT is invalid: it declares track
 // number 0, which no SimpleBlock may.
-func synBadSimpleBlock() []byte {
-	return synElem(matroska.IDSimpleBlock, []byte{0x80, 0x00, 0x00, 0x00, 0x77})
+func synBadSimpleBlock() ebmltest.Node {
+	return ebmltest.Leaf(matroska.IDSimpleBlock, []byte{0x80, 0x00, 0x00, 0x00, 0x77})
 }
 
 // TestContentErrorIsTerminalEvenWithResync checks the boundary of recovery: a
@@ -559,20 +505,17 @@ func synBadSimpleBlock() []byte {
 // failure of the cursor, so it must surface from Feed unchanged even with
 // WithResync enabled -- no byte scanning, no notify, no silent continuation.
 func TestContentErrorIsTerminalEvenWithResync(t *testing.T) {
-	good := synFragment(synConcat(
+	good := synFragment(
 		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
 		synCluster(0, synSimpleBlock(1, 0, []byte{0x01, 0x02})),
-	))
-	bad := synFragment(synConcat(
+	)
+	bad := synFragment(
 		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
-		synElem(matroska.IDCluster, synConcat(
-			synElem(matroska.IDTimestamp, synUint(0)),
-			synBadSimpleBlock(),
-		)),
-	))
+		synCluster(0, synBadSimpleBlock()),
+	)
 	// A third, perfectly good fragment follows: recovery would have found its EBML
 	// header and carried on, which is exactly what must NOT happen here.
-	raw := synConcat(good, bad, good)
+	raw := ebmltest.Concat(good, bad, good)
 
 	for _, sp := range []struct {
 		label  string
@@ -646,13 +589,10 @@ func TestContentErrorIsTerminalEvenWithResync(t *testing.T) {
 // reported identically when recovery was never enabled, so WithResync changes
 // nothing at all about this class of failure.
 func TestContentErrorIsTerminalWithoutResync(t *testing.T) {
-	raw := synFragment(synConcat(
+	raw := synFragment(
 		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
-		synElem(matroska.IDCluster, synConcat(
-			synElem(matroska.IDTimestamp, synUint(0)),
-			synBadSimpleBlock(),
-		)),
-	))
+		synCluster(0, synBadSimpleBlock()),
+	)
 
 	a := fragment.New()
 	frags, err := a.Feed(raw)

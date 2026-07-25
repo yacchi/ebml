@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/yacchi/ebml-reader/matroska"
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
 )
 
 type dumpOptions struct {
@@ -111,7 +111,7 @@ func dumpCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	maxBinary := fs.Int("max-binary", 16, "max bytes of a binary leaf to show as hex (0 = size only)")
 	asHex := fs.Bool("hex", false, "read the commented-hex fixture format (# comments + hex bytes) instead of raw EBML")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: ebml-reader dump [flags] [FILE]")
+		fmt.Fprintln(stderr, "Usage: ebml dump [flags] [FILE]")
 		fmt.Fprintln(stderr, "  Print an indented EBML element tree. FILE absent or \"-\" reads stdin.")
 		fs.PrintDefaults()
 	}
@@ -120,12 +120,12 @@ func dumpCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	in, closeFn, err := openInput(fs.Args(), stdin)
 	if err != nil {
-		fmt.Fprintf(stderr, "ebml-reader: %v\n", err)
+		fmt.Fprintf(stderr, "ebml: %v\n", err)
 		return 1
 	}
 	defer closeFn()
 	if err := runDump(in, stdout, dumpOptions{maxBinary: *maxBinary, hex: *asHex}); err != nil {
-		fmt.Fprintf(stderr, "ebml-reader: %v\n", err)
+		fmt.Fprintf(stderr, "ebml: %v\n", err)
 		return 1
 	}
 	return 0

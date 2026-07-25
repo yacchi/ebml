@@ -1,3 +1,3 @@
-module github.com/yacchi/ebml-reader
+module github.com/yacchi/ebml
 
 go 1.22

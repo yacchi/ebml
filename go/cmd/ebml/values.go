@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yacchi/ebml-reader/ext/tree"
-	"github.com/yacchi/ebml-reader/matroska"
-	"github.com/yacchi/ebml-reader/parser"
+	"github.com/yacchi/ebml/ext/tree"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
 )
 
 // hexBytes renders up to maxBinary bytes of b as space-free lowercase hex. When
