@@ -28,7 +28,46 @@ func FuzzParser(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		driveParser(data, false)
 		driveParser(data, true)
+		driveCursorFuzz(data, false)
+		driveCursorFuzz(data, true)
 	})
+}
+
+// driveCursorFuzz pulls every event a Cursor reports over arbitrary bytes, taking
+// the decisions a real consumer takes, so malformed input has to end the scan with
+// an error instead of panicking. Only fresh nodes are acted on: acting on a stale
+// one is a programmer error the API panics on by design.
+func driveCursorFuzz(data []byte, byteByByte bool) {
+	c := NewCursor(testKindClassifier, WithBoundary(func(open, next ElementID) bool {
+		return next == 0x1A45DFA3 || next == 0x18538067
+	}))
+	pull := func() {
+		for {
+			n, err := c.Next()
+			if err != nil {
+				return
+			}
+			switch node := n.(type) {
+			case *LeafNode:
+				// A payload that has not arrived yet reports NeedMoreData; the
+				// next pull then falls back to the skipping default.
+				_, _ = node.Payload()
+			case *MasterNode, *EndNode:
+			}
+		}
+	}
+
+	if byteByByte {
+		for i := range data {
+			c.Feed(data[i : i+1])
+			pull()
+		}
+	} else {
+		c.Feed(data)
+	}
+	pull()
+	_ = c.Finalize()
+	pull()
 }
 
 func loadFuzzHex(path string) ([]byte, error) {

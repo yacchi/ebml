@@ -628,13 +628,13 @@ func TestParseErrorKeepsGoodPrefix(t *testing.T) {
 	if !errors.As(err, &truncated) {
 		t.Errorf("error does not unwrap to parser.TruncatedError: %v", err)
 	}
-	// Parse has no handler, so its failures are structural by construction.
+	// Parse only reads, so its failures are structural by construction.
 	if !parser.IsStructural(err) {
 		t.Errorf("error is not classified structural: %v", err)
 	}
-	var he *parser.HandlerError
-	if errors.As(err, &he) {
-		t.Errorf("error claims a handler origin Parse cannot have: %v", err)
+	var ce *parser.ContentError
+	if errors.As(err, &ce) {
+		t.Errorf("error claims a content origin Parse cannot have: %v", err)
 	}
 	if len(roots) == 0 || roots[0].ID != matroska.IDEBML {
 		t.Fatal("the good prefix was discarded")

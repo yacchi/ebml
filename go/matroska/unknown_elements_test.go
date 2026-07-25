@@ -5,7 +5,9 @@ package matroska_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -68,8 +70,8 @@ func TestUnregisteredElementNeverBreaksTheReader(t *testing.T) {
 	stream, vendorPayload := vendorStream()
 
 	var got []byte
-	trace := scan(t, stream, matroska.KindForElementID, func(node parser.Node, payload []byte) {
-		if node.ID == idVendorBox {
+	trace := scan(t, stream, matroska.KindForElementID, func(id parser.ElementID, payload []byte) {
+		if id == idVendorBox {
 			got = append([]byte(nil), payload...)
 		}
 	})
@@ -111,8 +113,8 @@ func TestRegisteredVendorMasterNests(t *testing.T) {
 
 	var count uint64
 	var note string
-	trace := scan(t, stream, reg.KindForElementID, func(node parser.Node, payload []byte) {
-		switch node.ID {
+	trace := scan(t, stream, reg.KindForElementID, func(id parser.ElementID, payload []byte) {
+		switch id {
 		case idVendorCount:
 			value, err := parser.DecodeUint(payload)
 			if err != nil {
@@ -167,8 +169,8 @@ func TestOpaqueMasterRecoveredWithTree(t *testing.T) {
 	// Read the stream with the standard registry, keeping only the opaque bytes
 	// of the element it does not know.
 	var opaque []byte
-	scan(t, stream, matroska.KindForElementID, func(node parser.Node, payload []byte) {
-		if node.ID == idVendorBox {
+	scan(t, stream, matroska.KindForElementID, func(id parser.ElementID, payload []byte) {
+		if id == idVendorBox {
 			opaque = append([]byte(nil), payload...)
 		}
 	})
@@ -219,44 +221,73 @@ func TestOpaqueMasterRecoveredWithTree(t *testing.T) {
 // line per event, verifying that the trace is identical when the input arrives
 // one byte at a time. onPayload receives every leaf payload of the whole-input
 // run.
-func scan(t *testing.T, data []byte, classifier parser.KindClassifier, onPayload func(parser.Node, []byte)) []string {
+func scan(t *testing.T, data []byte, classifier parser.KindClassifier, onPayload func(parser.ElementID, []byte)) []string {
 	t.Helper()
-	run := func(chunk int, payloads func(parser.Node, []byte)) []string {
+	run := func(chunk int, payloads func(parser.ElementID, []byte)) []string {
 		var lines []string
-		handler := parser.HandlerFuncs{
-			MasterFunc: func(n parser.Node) (parser.Action, error) {
-				lines = append(lines, fmt.Sprintf("master %s d%d", n.ID, n.Depth))
-				return parser.Descend, nil
-			},
-			LeafFunc: func(n parser.Node) (parser.Action, error) {
-				lines = append(lines, fmt.Sprintf("leaf %s d%d", n.ID, n.Depth))
-				return parser.ReadPayload, nil
-			},
-			PayloadFunc: func(n parser.Node, payload []byte) error {
-				if payloads != nil {
-					payloads(n, payload)
+		c := parser.NewCursor(classifier)
+		pos := 0
+		feed := func() bool {
+			if pos >= len(data) {
+				return false
+			}
+			end := min(pos+chunk, len(data))
+			c.Feed(data[pos:end])
+			pos = end
+			return true
+		}
+		finalized := false
+		for {
+			node, err := c.Next()
+			if err != nil {
+				var needMore parser.NeedMoreData
+				switch {
+				case errors.As(err, &needMore):
+					if feed() {
+						continue
+					}
+					if finalized {
+						t.Fatalf("NeedMoreData after Finalize at offset %d", c.Offset())
+					}
+					finalized = true
+					if err := c.Finalize(); err != nil {
+						t.Fatalf("Finalize: %v", err)
+					}
+					continue
+				case errors.Is(err, io.EOF):
+					return lines
+				default:
+					t.Fatalf("Next at offset %d: %v", c.Offset(), err)
 				}
-				return nil
-			},
-			CloseFunc: func(n parser.Node) error {
-				lines = append(lines, fmt.Sprintf("close %s d%d", n.ID, n.Depth))
-				return nil
-			},
-		}
-		s := parser.NewScanner(handler, classifier)
-		for start := 0; start < len(data); start += chunk {
-			end := start + chunk
-			if end > len(data) {
-				end = len(data)
 			}
-			if err := s.Feed(data[start:end]); err != nil {
-				t.Fatalf("Feed: %v", err)
+			switch n := node.(type) {
+			case *parser.MasterNode:
+				lines = append(lines, fmt.Sprintf("master %s d%d", n.ID(), n.Depth()))
+			case *parser.LeafNode:
+				lines = append(lines, fmt.Sprintf("leaf %s d%d", n.ID(), n.Depth()))
+				// The node survives a Feed, so a payload that has not all arrived is
+				// simply retried.
+				payload, err := n.Payload()
+				for {
+					var needMore parser.NeedMoreData
+					if !errors.As(err, &needMore) {
+						break
+					}
+					if !feed() {
+						t.Fatalf("payload of %s still needs data at end of input", n.ID())
+					}
+					payload, err = n.Payload()
+				}
+				if err != nil {
+					t.Fatalf("Payload of %s: %v", n.ID(), err)
+				}
+				if payloads != nil {
+					payloads(n.ID(), payload)
+				}
+			case *parser.EndNode:
+				lines = append(lines, fmt.Sprintf("close %s d%d", n.ID(), n.Depth()))
 			}
 		}
-		if err := s.Finalize(); err != nil {
-			t.Fatalf("Finalize: %v", err)
-		}
-		return lines
 	}
 
 	whole := run(len(data), onPayload)

@@ -12,8 +12,8 @@ import (
 // the failure was detected, and the wrapped error is the parser's own diagnosis
 // (parser.TruncatedError, parser.ElementOverflowError, parser.VINTLengthError,
 // parser.UnknownSizeLeafError, parser.Invalid, ...), so errors.Is and errors.As
-// reach it. Parse drives the cursor itself and has no handler, so every error it
-// reports is a structural one: parser.IsStructural(err) is true.
+// reach it. Parse only reads -- it never judges an element's content -- so every
+// error it reports is a structural one: parser.IsStructural(err) is true.
 //
 // Parse returns a ParseError together with every element it had already parsed
 // completely, so a malformed tail never discards the good prefix.

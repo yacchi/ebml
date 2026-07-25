@@ -3,10 +3,9 @@
 //
 // It is an optional convenience: see package ext for the policy that applies to
 // every package under ext/. In short, this package is built only on the exported
-// API of parser (it drives a parser.Scanner with a parser.Handler), matroska and
-// ext/tree; it is deliberately outside the cross-language contract that
-// spec/SPEC.md defines, and other-language ports are not expected to provide an
-// equivalent.
+// API of parser (it pulls events from a parser.Cursor), matroska and ext/tree; it
+// is deliberately outside the cross-language contract that spec/SPEC.md defines,
+// and other-language ports are not expected to provide an equivalent.
 //
 // # Early emission
 //
@@ -92,6 +91,12 @@ type Fragment struct {
 
 	// Blocks holds every SimpleBlock of the Cluster, decoded with
 	// parser.ParseSimpleBlock, in stream order.
+	//
+	// A block that will not decode ends assembly by default. With
+	// WithSkipContentErrors set it is instead absent from this slice and was
+	// reported to that option's notify, while the Cluster tree still carries the
+	// element -- so a fragment whose Blocks cover less than its Cluster's extent is
+	// exactly the case that notify announced.
 	Blocks []*parser.SimpleBlock
 }
 

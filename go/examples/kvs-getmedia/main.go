@@ -78,17 +78,13 @@ func run(r io.Reader, w io.Writer) error {
 	a := fragment.New()
 	buf := make([]byte, 4096)
 	n := 0
-	var previousTags map[string]string
-	var previousUUID string
+	tagHistory := make(map[string]map[string]string)
 
 	report := func(frags []*fragment.Fragment) {
 		for _, f := range frags {
 			n++
-			tags, uuid := effectiveTags(f, previousTags, previousUUID)
+			tags := effectiveTags(f, tagHistory)
 			printFragment(w, n, f, tags)
-			if len(tags) > 0 {
-				previousTags, previousUUID = tags, uuid
-			}
 		}
 	}
 
@@ -122,18 +118,30 @@ func run(r io.Reader, w io.Writer) error {
 }
 
 // printFragment renders one assembled fragment.
-func effectiveTags(f *fragment.Fragment, previous map[string]string, previousUUID string) (map[string]string, string) {
+func effectiveTags(f *fragment.Fragment, history map[string]map[string]string) map[string]string {
 	tags := f.Tags()
 	uuid := ""
 	if value := f.Value(matroska.IDSegmentUUID); value != nil {
 		uuid = fmt.Sprintf("%x", value.Bytes())
 	}
-	if len(tags) == 0 && uuid != "" && uuid == previousUUID {
-		// KVS consumers may inherit tagless metadata; this policy belongs here,
-		// not in the generic fragment assembler.
-		tags = previous
+	if uuid == "" {
+		return tags
 	}
-	return tags, uuid
+	// KVS consumers may inherit metadata per key; this policy belongs here, not
+	// in the generic fragment assembler. Whole-Tags absence is the simplified
+	// case, while the field shape is partial: Tags is present but identity keys
+	// may be missing.
+	effective := make(map[string]string, len(tags))
+	for name, value := range history[uuid] {
+		effective[name] = value
+	}
+	for name, value := range tags {
+		effective[name] = value
+	}
+	if len(effective) > 0 {
+		history[uuid] = effective
+	}
+	return effective
 }
 
 func tag(f *fragment.Fragment, tags map[string]string, name string) (string, bool) {

@@ -6,6 +6,23 @@ import (
 	"math"
 )
 
+// Kind is a KindClassifier's verdict about an element, and it is STRUCTURAL: the
+// cursor uses it for one decision only -- whether the element's payload is a
+// sequence of child elements (KindMaster) or opaque bytes (every other kind) --
+// plus KindEndMaster, which is not an element's kind at all but the marker of a
+// master's end. Nothing else here consults it, and it is reported on every event
+// (Node.Kind) so a consumer sees the verdict the element was read by rather than
+// having to infer it from the node variant.
+//
+// It is NOT the value type to interpret a payload as, and the division of labour is
+// deliberate: a classifier only has to separate masters from leaves for a stream to
+// be read correctly, so the leaf kinds here are exactly what a classifier chose to
+// distinguish and nothing more. A consumer that wants to DECODE a payload asks the
+// element registry -- matroska.TypeFor and matroska.ValueType -- which is where the
+// full value-type knowledge lives, and then calls the matching DecodeUint,
+// DecodeInt, DecodeFloat or DecodeString. Never switch on a cursor kind to pick a
+// decoder: KindBinary and KindUnknown are what an unlisted or deliberately opaque
+// element classifies as, and neither says anything about the bytes.
 type Kind string
 
 const (
@@ -45,11 +62,30 @@ type masterFrame struct {
 
 // KindClassifier maps an element ID to the kind the cursor should treat it as.
 // It is the cursor's only source of element knowledge and therefore a required
-// argument of New and NewScanner; matroska.KindForElementID covers the standard
+// argument of New and NewCursor; matroska.KindForElementID covers the standard
 // Matroska element set.
 type KindClassifier func(id ElementID) Kind
 
-type Option func(*Parser)
+// Option configures a cursor: New and NewCursor take the same options, and each
+// reads the ones that apply to it (a rule about unknown-size masters, for instance,
+// means nothing to the low-level Parser primitives; see WithBoundary).
+type Option func(*settings)
+
+// settings is the accumulated effect of a list of Options.
+type settings struct {
+	startOffset int64
+	boundary    BoundaryFunc
+}
+
+func apply(opts []Option) settings {
+	var s settings
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&s)
+		}
+	}
+	return s
+}
 
 // WithStartOffset makes the cursor count absolute offsets from off instead of 0,
 // for a cursor that resumes a stream another cursor was reading.
@@ -61,9 +97,9 @@ type Option func(*Parser)
 // reported would restart at 0 and no longer refer to the stream the caller is
 // reading. A negative off is ignored.
 func WithStartOffset(off int64) Option {
-	return func(p *Parser) {
+	return func(s *settings) {
 		if off >= 0 {
-			p.absOffset = off
+			s.startOffset = off
 		}
 	}
 }
@@ -97,14 +133,15 @@ func New(classify KindClassifier, opts ...Option) *Parser {
 	if classify == nil {
 		panic("parser.New: classify must not be nil; the cursor has no built-in element knowledge (pass matroska.KindForElementID)")
 	}
-	p := &Parser{
+	set := apply(opts)
+	return &Parser{
 		buf:            make([]byte, 0, 4096),
 		kindClassifier: classify,
+		absOffset:      set.startOffset,
+		// Sized for the depth of real documents so a scan does not grow this
+		// slice, which would allocate mid-scan.
+		stack: make([]masterFrame, 0, 8),
 	}
-	for _, opt := range opts {
-		opt(p)
-	}
-	return p
 }
 
 func (p *Parser) Offset() int64 { return p.absOffset }
@@ -403,28 +440,53 @@ func (p *Parser) SkipCurrentPayload() error {
 }
 
 // ReadPayload reads and consumes the full payload of the current element.
-// It returns a copy of the payload bytes.
+// It returns a copy of the payload bytes, which the caller owns.
 func (p *Parser) ReadPayload() ([]byte, error) {
+	start, n, err := p.consumePayload()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, n)
+	copy(out, p.buf[start:start+n])
+	p.trimBuffer()
+	return out, nil
+}
+
+// consumePayload consumes the current element's payload WITHOUT copying it and
+// reports where those bytes sit in the buffer, for a caller that hands out a view of
+// them instead of a copy (Cursor's LeafNode.Payload). Use view to turn the extent
+// back into bytes.
+//
+// It deliberately does NOT trim the buffer: trimming shifts the remaining bytes down
+// over the payload just consumed, which would rewrite the bytes a view still refers
+// to. The next consuming operation trims instead, which is exactly the point at
+// which such a view goes stale anyway.
+func (p *Parser) consumePayload() (start, n int, err error) {
 	if p.current == nil {
-		return nil, Invalid{Msg: "no current element; call consume_header first"}
+		return 0, 0, Invalid{Msg: "no current element; call consume_header first"}
 	}
 	if p.current.size < 0 {
-		return nil, p.unknownSizePayloadError("read")
+		return 0, 0, p.unknownSizePayloadError("read")
 	}
 	if p.current.size > math.MaxInt {
-		return nil, Invalid{Msg: "payload too large to read on this platform"}
+		return 0, 0, Invalid{Msg: "payload too large to read on this platform"}
 	}
 	need := int(p.current.size)
 	if p.available() < need {
-		return nil, NeedMoreData{MinBytes: need - p.available()}
+		return 0, 0, NeedMoreData{MinBytes: need - p.available()}
 	}
-	out := make([]byte, need)
-	copy(out, p.buf[p.pos:p.pos+need])
+	start = p.pos
 	p.pos += need
 	p.absOffset += int64(need)
 	p.current = nil
-	p.trimBuffer()
-	return out, nil
+	return start, need, nil
+}
+
+// view returns the bytes a consumePayload extent refers to. The capacity is clamped
+// to the extent, so an append by the caller cannot reach the bytes the parser has
+// not consumed yet.
+func (p *Parser) view(start, n int) []byte {
+	return p.buf[start : start+n : start+n]
 }
 
 // FormatID renders an element ID as bare lowercase hex without a "0x" prefix

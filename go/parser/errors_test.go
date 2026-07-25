@@ -3,6 +3,8 @@ package parser
 import (
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"testing"
 )
 
@@ -114,127 +116,104 @@ func TestNeedMoreDataIsNotStructural(t *testing.T) {
 	}
 }
 
-// TestHandlerErrorIsNotStructural checks the second half of the classification: an
-// error the CONSUMER returned is reported as handler-originated, is not structural,
-// and still carries the handler's own error for errors.Is/errors.As.
-func TestHandlerErrorIsNotStructural(t *testing.T) {
+// TestContentErrorIsNotStructural checks the second half of the classification: a
+// CONSUMER's verdict about an element's content is not structural, and still
+// carries the consumer's own error for errors.Is/errors.As.
+func TestContentErrorIsNotStructural(t *testing.T) {
 	sentinel := errors.New("cannot decode this payload")
-	err := error(handlerErr(OpPayload, Node{ID: idSimpleBlock, Offset: 42}, sentinel))
+	err := NewContentError(curIDSimpleBlock, 42, sentinel)
 
 	if IsStructural(err) {
-		t.Fatal("a handler error must not be structural: the stream's shape was fine")
+		t.Fatal("a content error must not be structural: the stream's shape was fine")
 	}
 	if errors.Is(err, ErrStructural) {
-		t.Fatal("a handler error must not match ErrStructural: the stream's shape was fine")
+		t.Fatal("a content error must not match ErrStructural: the stream's shape was fine")
 	}
 	if !errors.Is(err, sentinel) {
-		t.Fatalf("the handler's own error is not reachable through the wrapper: %v", err)
+		t.Fatalf("the consumer's own error is not reachable through the wrapper: %v", err)
 	}
-	var he *HandlerError
-	if !errors.As(err, &he) {
-		t.Fatalf("errors.As did not find *HandlerError in %v (%T)", err, err)
+	var ce *ContentError
+	if !errors.As(err, &ce) {
+		t.Fatalf("errors.As did not find *ContentError in %v (%T)", err, err)
 	}
-	if he.Op != OpPayload || he.Node.ID != idSimpleBlock || he.Node.Offset != 42 {
-		t.Fatalf("HandlerError = %+v, want the payload event of %s at offset 42", he, idSimpleBlock)
+	if ce.ID != curIDSimpleBlock || ce.Offset != 42 {
+		t.Fatalf("ContentError = %+v, want %s at offset 42", ce, curIDSimpleBlock)
 	}
-	if !errors.Is(he.Err, sentinel) {
-		t.Fatalf("HandlerError.Err = %v, want the handler's error", he.Err)
+	if !errors.Is(ce.Err, sentinel) {
+		t.Fatalf("ContentError.Err = %v, want the consumer's error", ce.Err)
+	}
+	if !strings.Contains(err.Error(), "42") || !strings.Contains(err.Error(), sentinel.Error()) {
+		t.Fatalf("Error() = %q, want the element location and the consumer's message", err)
 	}
 
-	// A structural failure is the other class and must not look handler-originated.
-	if errors.As(error(TruncatedError{}), &he) {
-		t.Fatal("a structural error must not be reported as a handler error")
+	// A structural failure is the other class and must not look content-originated.
+	if errors.As(error(TruncatedError{}), &ce) {
+		t.Fatal("a structural error must not be reported as a content error")
 	}
-	if handlerErr(OpClose, Node{}, nil) != nil {
-		t.Fatal("handlerErr(nil) must stay nil")
+	if NewContentError(curIDSimpleBlock, 0, nil) != nil {
+		t.Fatal("NewContentError(nil) must stay nil")
 	}
 }
 
-// TestScannerClassifiesFeedErrors checks the classification end to end, on the two
-// errors a Scanner caller actually receives: a handler's refusal and corrupt bytes.
-func TestScannerClassifiesFeedErrors(t *testing.T) {
-	raw := topologyBasic(t)
+// TestCursorFailureIsStructural checks the classification end to end on the error a
+// consumer actually receives from the cursor: corrupt bytes are structural, carry
+// their diagnosis, and claim no content origin.
+func TestCursorFailureIsStructural(t *testing.T) {
+	// A leading 0x00 byte encodes a 9-byte element ID VINT, over the 4-byte
+	// maximum, so no element can be located from there on.
+	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	c := NewCursor(testKindClassifier)
+	c.Feed(append(append([]byte(nil), raw...), 0x00, 0x11, 0x22))
 
-	t.Run("handler_error", func(t *testing.T) {
-		sentinel := errors.New("the consumer refuses this element")
-		h := &HandlerFuncs{LeafFunc: func(n Node) (Action, error) {
-			if n.ID == idSimpleBlock {
-				return 0, sentinel
+	err := drainCursor(c)
+	if !IsStructural(err) {
+		t.Fatalf("cursor error = %v, want a structural classification", err)
+	}
+	if !errors.Is(err, ErrElementIDTooLong) {
+		t.Fatalf("cursor error = %v, want the ID-length diagnosis as well", err)
+	}
+	var ce *ContentError
+	if errors.As(err, &ce) {
+		t.Fatalf("cursor error = %v, want no content origin", err)
+	}
+	// Wrapping by an outer layer must not lose the class.
+	if !IsStructural(fmt.Errorf("assembling: %w", err)) {
+		t.Fatal("the structural class did not survive a consumer's wrapping")
+	}
+}
+
+// drainCursor pulls events until something other than NeedMoreData comes back,
+// finalizing once the fed bytes are drained, and reports what stopped it (nil for a
+// clean io.EOF).
+func drainCursor(c *Cursor) error {
+	finalized := false
+	for {
+		_, err := c.Next()
+		switch {
+		case err == nil:
+		case isNeedMore(err):
+			if finalized {
+				return err
 			}
-			return SkipPayload, nil
-		}}
-		s := NewScanner(h, testKindClassifier)
-		err := feedChunks(s, raw, 7)
-		if !errors.Is(err, sentinel) {
-			t.Fatalf("Feed error = %v, want the handler's sentinel", err)
-		}
-		if IsStructural(err) {
-			t.Fatalf("Feed error %v is classified structural, but the bytes were readable", err)
-		}
-		var he *HandlerError
-		if !errors.As(err, &he) {
-			t.Fatalf("Feed error = %v (%T), want *HandlerError", err, err)
-		}
-		if he.Op != OpLeaf || he.Node.ID != idSimpleBlock {
-			t.Fatalf("HandlerError = %+v, want the leaf event of %s", he, idSimpleBlock)
-		}
-	})
-
-	t.Run("structural_error", func(t *testing.T) {
-		// A leading 0x00 byte encodes a 9-byte element ID VINT, over the 4-byte
-		// maximum, so no element can be located from there on.
-		s := NewScanner(&HandlerFuncs{}, testKindClassifier)
-		err := feedChunks(s, append(append([]byte(nil), raw...), 0x00, 0x11, 0x22), 7)
-		if err == nil {
-			err = s.Finalize()
-		}
-		if !IsStructural(err) {
-			t.Fatalf("Feed error = %v, want a structural classification", err)
-		}
-		if !errors.Is(err, ErrElementIDTooLong) {
-			t.Fatalf("Feed error = %v, want the ID-length diagnosis as well", err)
-		}
-		var he *HandlerError
-		if errors.As(err, &he) {
-			t.Fatalf("Feed error = %v, want no handler origin", err)
-		}
-	})
-
-	t.Run("close_error_from_finalize", func(t *testing.T) {
-		sentinel := errors.New("the consumer refuses this close")
-		h := &HandlerFuncs{CloseFunc: func(n Node) error {
-			if n.ID == idSegment {
-				return sentinel
+			finalized = true
+			if ferr := c.Finalize(); ferr != nil {
+				return ferr
 			}
+		case errors.Is(err, io.EOF):
 			return nil
-		}}
-		s := NewScanner(h, testKindClassifier)
-		if err := feedChunks(s, raw, 7); err != nil {
-			t.Fatalf("Feed error = %v", err)
+		default:
+			return err
 		}
-		err := s.Finalize()
-		var he *HandlerError
-		if !errors.As(err, &he) || he.Op != OpClose || he.Node.ID != idSegment {
-			t.Fatalf("Finalize error = %v, want a %s HandlerError for the Segment", err, OpClose)
-		}
-		if IsStructural(err) {
-			t.Fatalf("Finalize error %v is classified structural", err)
-		}
-		if !errors.Is(err, sentinel) {
-			t.Fatalf("Finalize error = %v, want the handler's sentinel", err)
-		}
-	})
+	}
 }
 
-// TestHandlerReturningCursorErrorIsNotStructural checks the boundary rule that a
-// sentinel alone cannot express: a Handler is free to return one of the cursor's
-// OWN structural error values, and the result must still be classified as
-// handler-originated. errors.Is walks the whole chain and therefore reports
-// ErrStructural here, which is exactly why IsStructural exists and is the
-// documented test.
-func TestHandlerReturningCursorErrorIsNotStructural(t *testing.T) {
-	raw := topologyBasic(t)
-
+// TestContentErrorCarryingCursorErrorIsNotStructural checks the boundary rule that a
+// sentinel alone cannot express: a consumer's verdict about content is free to carry
+// one of the cursor's OWN structural error values, and must still be classified as
+// content-originated. errors.Is walks the whole chain and therefore reports
+// ErrStructural here, which is exactly why IsStructural exists and is the documented
+// test.
+func TestContentErrorCarryingCursorErrorIsNotStructural(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
@@ -246,43 +225,33 @@ func TestHandlerReturningCursorErrorIsNotStructural(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			h := &HandlerFuncs{LeafFunc: func(n Node) (Action, error) {
-				if n.ID == idSimpleBlock {
-					return 0, c.err
-				}
-				return SkipPayload, nil
-			}}
-			s := NewScanner(h, testKindClassifier)
-			err := feedChunks(s, raw, 7)
-			if err == nil {
-				t.Fatal("Feed of a stream the handler refuses returned no error")
-			}
+			err := NewContentError(curIDSimpleBlock, 582, c.err)
 
 			// The classification: the bytes were read perfectly, so the failure
 			// belongs to the consumer whatever value it chose.
 			if IsStructural(err) {
-				t.Fatalf("IsStructural(%v) = true, want false: the handler refused readable bytes", err)
+				t.Fatalf("IsStructural(%v) = true, want false: the bytes were readable", err)
 			}
 			// Wrapping by an outer layer must not change that.
 			if IsStructural(fmt.Errorf("assembling: %w", err)) {
-				t.Fatal("a wrapped handler error was classified structural")
+				t.Fatal("a wrapped content error was classified structural")
 			}
 
-			// Reachability is a separate question and stays intact: the origin
-			// wrapper and the handler's own value are both still findable.
-			var he *HandlerError
-			if !errors.As(err, &he) {
-				t.Fatalf("errors.As did not find *HandlerError in %v (%T)", err, err)
+			// Reachability is a separate question and stays intact: the marker and
+			// the consumer's own value are both still findable.
+			var ce *ContentError
+			if !errors.As(err, &ce) {
+				t.Fatalf("errors.As did not find *ContentError in %v (%T)", err, err)
 			}
-			if he.Op != OpLeaf || he.Node.ID != idSimpleBlock {
-				t.Fatalf("HandlerError = %+v, want the leaf event of %s", he, idSimpleBlock)
+			if ce.ID != curIDSimpleBlock || ce.Offset != 582 {
+				t.Fatalf("ContentError = %+v, want %s at offset 582", ce, curIDSimpleBlock)
 			}
 			if !errors.Is(err, c.err) {
-				t.Fatalf("the handler's own error %v is not reachable through the wrapper: %v", c.err, err)
+				t.Fatalf("the consumer's own error %v is not reachable through the wrapper: %v", c.err, err)
 			}
 			var truncated TruncatedError
 			if _, isTruncated := c.err.(TruncatedError); isTruncated && !errors.As(err, &truncated) {
-				t.Fatalf("errors.As no longer reaches the handler's TruncatedError: %v", err)
+				t.Fatalf("errors.As no longer reaches the consumer's TruncatedError: %v", err)
 			}
 		})
 	}

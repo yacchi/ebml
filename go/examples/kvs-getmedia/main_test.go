@@ -66,6 +66,7 @@ func TestTaglessFragmentsInheritMatchingUUIDTags(t *testing.T) {
 	if err := run(bytes.NewReader(raw), &out); err != nil {
 		t.Fatal(err)
 	}
+
 	got := out.String()
 	for _, fragment := range []string{"fragment 2", "fragment 3"} {
 		start := strings.Index(got, fragment)
@@ -86,6 +87,28 @@ func TestTaglessFragmentsInheritMatchingUUIDTags(t *testing.T) {
 			if !strings.Contains(part, want) {
 				t.Errorf("%s missing %q:\n%s", fragment, want, part)
 			}
+		}
+	}
+}
+
+func TestPartialTagsInheritMissingIdentityKeys(t *testing.T) {
+	raw := loadFixture(t, "partial_tags")
+	var out bytes.Buffer
+	if err := run(bytes.NewReader(raw), &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	start := strings.Index(got, "fragment 2")
+	if start < 0 {
+		t.Fatal("missing fragment 2")
+	}
+	part := got[start:]
+	for _, want := range []string{
+		"fragment_number:   partial-1",
+		"contact_id:        00000000-0000-4000-8000-000000000001",
+	} {
+		if !strings.Contains(part, want) {
+			t.Fatalf("partial fragment missing %q:\n%s", want, part)
 		}
 	}
 }

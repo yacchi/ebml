@@ -176,10 +176,12 @@ func parseDecimalSeconds(t *testing.T, s string) time.Time {
 // allFixtures is every committed KVS fixture.
 var allFixtures = []string{
 	"topology_basic",
+	"two_tracks",
 	"multi_cluster",
 	"multi_segment",
 	"tagless_single",
 	"tagless_consecutive",
+	"partial_tags",
 	"filter_mismatch",
 	"gap",
 	"false_ebml_magic_in_pcm",
@@ -474,10 +476,68 @@ func TestTaglessConsecutive(t *testing.T) {
 	if len(frags) != 4 {
 		t.Fatalf("want 4 fragments, got %d", len(frags))
 	}
+
 	for i, wantTagged := range []bool{true, false, false, true} {
 		_, ok := frags[i].Tag("ContactId")
 		if ok != wantTagged {
 			t.Fatalf("fragment %d ContactId present = %v, want %v", i, ok, wantTagged)
+		}
+	}
+}
+
+func TestPartialTags(t *testing.T) {
+	raw := loadHex(t, "partial_tags")
+	frags := run(t, splitRandom(raw, 12345, 7)).all()
+	if len(frags) != 2 {
+		t.Fatalf("want 2 fragments, got %d", len(frags))
+	}
+	if got := len(frags[1].Tags()); got != 3 {
+		t.Fatalf("partial fragment Tags() length = %d, want 3", got)
+	}
+	if _, ok := frags[1].Tag("ContactId"); ok {
+		t.Fatal("partial fragment must omit ContactId in the source Tags")
+	}
+	if _, ok := frags[1].Tag("InstanceId"); ok {
+		t.Fatal("partial fragment must omit InstanceId in the source Tags")
+	}
+	if got := frags[1].Value(matroska.IDSegmentUUID).Bytes(); !reflect.DeepEqual(got, frags[0].Value(matroska.IDSegmentUUID).Bytes()) {
+		t.Fatalf("partial fragment UUID = %x, want %x", got, frags[0].Value(matroska.IDSegmentUUID).Bytes())
+	}
+}
+
+func TestTwoTracks(t *testing.T) {
+	raw := loadHex(t, "two_tracks")
+	frags := run(t, splitFibonacci(raw)).all()
+	if len(frags) != 1 {
+		t.Fatalf("want 1 fragment, got %d", len(frags))
+	}
+	f := frags[0]
+	if len(f.Blocks) != 3 {
+		t.Fatalf("want 3 blocks, got %d", len(f.Blocks))
+	}
+	wantTrack1 := make([]byte, 0, 40)
+	for i := byte(0); i < 24; i++ {
+		wantTrack1 = append(wantTrack1, 0x11+i)
+	}
+	for i := byte(0); i < 16; i++ {
+		wantTrack1 = append(wantTrack1, 0x31+i)
+	}
+	wantTrack2 := make([]byte, 0, 32)
+	for i := byte(0); i < 32; i++ {
+		wantTrack2 = append(wantTrack2, 0x21+i)
+	}
+	if got := f.TrackPCM(1); !reflect.DeepEqual(got, wantTrack1) {
+		t.Fatalf("TrackPCM(1) = %x, want %x", got, wantTrack1)
+	}
+	if got := f.TrackPCM(2); !reflect.DeepEqual(got, wantTrack2) {
+		t.Fatalf("TrackPCM(2) = %x, want %x", got, wantTrack2)
+	}
+	if len(f.TrackPCM(1)) == len(f.TrackPCM(2)) {
+		t.Fatal("track PCM lengths must differ")
+	}
+	for _, name := range []string{"AUDIO_FROM_CUSTOMER", "AUDIO_TO_CUSTOMER"} {
+		if _, ok := f.TrackByName(name); !ok {
+			t.Fatalf("TrackByName(%q) did not resolve", name)
 		}
 	}
 }

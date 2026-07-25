@@ -201,18 +201,25 @@ func (s *stream) tracks(audioParams bool) {
 }
 
 // tags writes a Tags element. If contactID is "" the ContactId SimpleTag is omitted
-// (tagless-by-contact fragment).
+// (tagless-by-contact fragment). omitIdentity omits both identity tags while
+// retaining the ordinary fragment metadata.
 func (s *stream) tags(producerTS, fragmentNumber, contactID string) {
+	s.tagsWithIdentity(producerTS, fragmentNumber, contactID, false)
+}
+
+func (s *stream) tagsWithIdentity(producerTS, fragmentNumber, contactID string, omitIdentity bool) {
 	s.master(matroska.IDTags, func() {
 		s.master(matroska.IDTag, func() {
 			s.master(matroska.IDTargets, nil) // empty Targets master
 			s.simpleTag("AWS_KINESISVIDEO_PRODUCER_TIMESTAMP", producerTS)
 			s.simpleTag("AWS_KINESISVIDEO_FRAGMENT_NUMBER", fragmentNumber)
 			s.simpleTag("AWS_KINESISVIDEO_CONTINUATION_TOKEN", fakeContinuation)
-			if contactID != "" {
-				s.simpleTag("ContactId", contactID)
+			if !omitIdentity {
+				if contactID != "" {
+					s.simpleTag("ContactId", contactID)
+				}
+				s.simpleTag("InstanceId", fakeInstance)
 			}
-			s.simpleTag("InstanceId", fakeInstance)
 		})
 	})
 }
@@ -228,7 +235,11 @@ type block struct {
 // timecode, flags byte, then PCM. The whole thing is one binary leaf — the block
 // structure lives inside the payload, not in EBML.
 func (s *stream) simpleBlock(b block) {
-	content := []byte{0x81} // track number 1 as a 1-byte VINT
+	s.simpleBlockOnTrack(1, b)
+}
+
+func (s *stream) simpleBlockOnTrack(trackNumber uint64, b block) {
+	content := []byte{0x80 | byte(trackNumber)} // track number as a 1-byte VINT
 	content = append(content, byte(uint16(b.timecode)>>8), byte(uint16(b.timecode)))
 	content = append(content, 0x00) // flags
 	content = append(content, b.audio...)
@@ -245,6 +256,18 @@ func (s *stream) cluster(clusterTS uint64, blocks ...block) {
 	})
 }
 
+func (s *stream) twoTrackCluster(clusterTS uint64, blocks ...struct {
+	track uint64
+	block
+}) {
+	s.master(matroska.IDCluster, func() {
+		s.uint(matroska.IDTimestamp, clusterTS)
+		for _, b := range blocks {
+			s.simpleBlockOnTrack(b.track, b.block)
+		}
+	})
+}
+
 // ---- Fragment builder ----
 
 type fragOpts struct {
@@ -256,6 +279,7 @@ type fragOpts struct {
 	uidSeed        byte   // seed for the synthetic SegmentUUID when includeInfo is set
 	timestampScale uint64 // 0 => defaultTimestampScale
 	audioParams    bool
+	omitIdentity   bool
 	clusterTS      uint64
 	blocks         []block
 }
@@ -273,7 +297,7 @@ func (s *stream) fragment(o fragOpts) {
 		}
 		s.tracks(o.audioParams)
 		if !o.omitTags {
-			s.tags(o.producerTS, o.fragmentNumber, o.contactID)
+			s.tagsWithIdentity(o.producerTS, o.fragmentNumber, o.contactID, o.omitIdentity)
 		}
 		s.cluster(o.clusterTS, o.blocks...)
 	})

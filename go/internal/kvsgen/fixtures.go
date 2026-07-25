@@ -36,10 +36,12 @@ type Fixture struct {
 func BuildAll() []Fixture {
 	return []Fixture{
 		topologyBasic(),
+		twoTracks(),
 		multiCluster(),
 		multiSegment(),
 		taglessSingle(),
 		taglessConsecutive(),
+		partialTags(),
 		filterMismatch(),
 		gap(),
 		falseEBMLMagicInPCM(),
@@ -239,6 +241,54 @@ func topologyBasic() Fixture {
 	}
 }
 
+func twoTracks() Fixture {
+	s := newStream()
+	s.ebmlHeader()
+	s.unknownMaster(matroska.IDSegment, func() {
+		s.info(segmentUID(0x18), defaultTimestampScale)
+		s.tracks(true)
+		s.tags("1100000000.000", "two-track-0", fakeContactA)
+		s.twoTrackCluster(0,
+			struct {
+				track uint64
+				block
+			}{1, block{0, pcm(24, 0x11)}},
+			struct {
+				track uint64
+				block
+			}{2, block{0, pcm(32, 0x21)}},
+			struct {
+				track uint64
+				block
+			}{1, block{10, pcm(16, 0x31)}},
+		)
+	})
+	data := s.bytes()
+	return Fixture{
+		Name: "two_tracks",
+		Comment: joinLines(
+			"two_tracks: ONE fragment with both named audio tracks carrying blocks in the",
+			"SAME known-size Cluster. Track 1 has 40 PCM bytes total and Track 2 has 32",
+			"PCM bytes in one block; the unequal lengths exercise per-track selection.",
+		),
+		Data: data,
+		Facts: Facts{
+			Description:        "One Cluster carries blocks for both named audio tracks.",
+			Fragments:          1,
+			Segments:           1,
+			Clusters:           1,
+			SimpleBlocks:       3,
+			EBMLHeaders:        1,
+			UnknownSizeSegment: true,
+			KnownSizeCluster:   true,
+			ContactIDs:         []string{fakeContactA},
+			ProducerTimestamps: []string{"1100000000.000"},
+			FragmentNumbers:    []string{"two-track-0"},
+			Notes:              "Track 1 uses two blocks of 24 and 16 bytes; Track 2 uses one block of 32 bytes.",
+		},
+	}
+}
+
 func multiSegment() Fixture {
 	tss := []string{"1000000000.000", "1000000001.024", "1000000002.048", "1000000003.072"}
 	fns := []string{"...001", "...002", "...003", "...004"}
@@ -369,6 +419,46 @@ func taglessConsecutive() Fixture {
 			ProducerTimestamps: []string{"3000000000.000", "3000000001.024", "3000000002.048", "3000000003.072"},
 			FragmentNumbers:    []string{"c-0", "c-1", "c-2", "c-3"},
 			Notes:              "Two consecutive tagless fragments; cursor parses cleanly.",
+		},
+	}
+
+}
+
+func partialTags() Fixture {
+	s := newStream()
+	s.fragment(fragOpts{
+		producerTS: "3200000000.000", fragmentNumber: "partial-0", contactID: fakeContactA,
+		includeInfo: true, uidSeed: 0x58, clusterTS: 0,
+		blocks: []block{{0, pcm(24, 0x11)}},
+	})
+	s.fragment(fragOpts{
+		producerTS: "3200000001.024", fragmentNumber: "partial-1",
+		includeInfo: true, uidSeed: 0x58, omitIdentity: true, clusterTS: 1024,
+		blocks: []block{{0, pcm(24, 0x12)}},
+	})
+	data := s.bytes()
+	return Fixture{
+		Name: "partial_tags",
+		Comment: joinLines(
+			"partial_tags: TWO fragments with the same SegmentUUID. The second fragment",
+			"has a PRESENT, populated Tags element carrying producer timestamp, fragment",
+			"number, and continuation token, but omits ContactId and InstanceId.",
+			"Per-key identity inheritance is a consumer policy, not assembler behavior.",
+		),
+		Data: data,
+		Facts: Facts{
+			Description:        "Second fragment has populated partial Tags without identity keys.",
+			Fragments:          2,
+			Segments:           2,
+			Clusters:           2,
+			SimpleBlocks:       2,
+			EBMLHeaders:        2,
+			UnknownSizeSegment: true,
+			KnownSizeCluster:   true,
+			ContactIDs:         []string{fakeContactA, ""},
+			ProducerTimestamps: []string{"3200000000.000", "3200000001.024"},
+			FragmentNumbers:    []string{"partial-0", "partial-1"},
+			Notes:              "The second Segment repeats the UUID but omits ContactId and InstanceId only.",
 		},
 	}
 }

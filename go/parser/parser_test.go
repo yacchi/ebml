@@ -24,7 +24,7 @@ type logEvent struct {
 
 func i64p(v int64) *int64 { return &v }
 
-func loadHexFixture(t *testing.T, rel string) []byte {
+func loadHexFixture(t testing.TB, rel string) []byte {
 	t.Helper()
 	path := filepath.Join("..", "..", rel)
 	b, err := os.ReadFile(path)
@@ -198,6 +198,54 @@ func scanAll(t *testing.T, p *Parser, events *[]logEvent, step *int, needMoreCou
 			Offset: consumeOffset,
 			Depth:  p.Depth(),
 		})
+	}
+}
+
+// TestElementHeaderOffsetAndClosedMasterExtent checks that the low-level cursor
+// reports element extents too, so a caller driving the primitives never
+// reconstructs an offset from event order.
+func TestElementHeaderOffsetAndClosedMasterExtent(t *testing.T) {
+	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	p := New(testKindClassifier)
+	p.Feed(raw)
+
+	h, err := p.Peek()
+	if err != nil {
+		t.Fatalf("Peek: %v", err)
+	}
+	if h.Offset != 0 || h.ID != curIDEBMLHeader {
+		t.Fatalf("first header = %s offset=%d, want %s at 0", h.ID, h.Offset, curIDEBMLHeader)
+	}
+	if _, err := p.ConsumeHeader(); err != nil {
+		t.Fatalf("ConsumeHeader: %v", err)
+	}
+	if err := p.EnterMaster(); err != nil {
+		t.Fatalf("EnterMaster: %v", err)
+	}
+	h, err = p.Peek()
+	if err != nil {
+		t.Fatalf("Peek child: %v", err)
+	}
+	if h.Offset != 5 {
+		t.Fatalf("child header offset = %d, want 5", h.Offset)
+	}
+
+	// FinalizeEOF's own report carries the closed master's extent.
+	p2 := New(testKindClassifier)
+	p2.Feed(raw)
+	if err := drainDefectTest(p2); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	closed, err := p2.FinalizeEOF()
+	if err != nil {
+		t.Fatalf("FinalizeEOF: %v", err)
+	}
+	if len(closed) != 1 {
+		t.Fatalf("FinalizeEOF closed %d masters, want 1", len(closed))
+	}
+	cm := closed[0]
+	if cm.ID != curIDSegment || cm.Start != 24 || cm.End != int64(len(raw)) || cm.Depth != 1 {
+		t.Fatalf("closed master = %+v, want Segment start=24 end=%d depth=1", cm, len(raw))
 	}
 }
 

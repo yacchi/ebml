@@ -2,7 +2,9 @@ package writer_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -13,63 +15,114 @@ import (
 // event is one cursor event, recorded so a written document can be compared to the
 // element sequence it was written as.
 type event struct {
-	op      string
-	node    parser.Node
-	payload []byte
+	op        string
+	id        parser.ElementID
+	depth     int
+	offset    int64
+	end       int64
+	size      int64
+	headerLen int
+	payload   []byte
 }
 
 func (e event) String() string {
 	if e.op == "payload" {
-		return fmt.Sprintf("payload id=%s bytes=%X", e.node.ID, e.payload)
+		return fmt.Sprintf("payload id=%s bytes=%X", e.id, e.payload)
 	}
-	return fmt.Sprintf("%s id=%s depth=%d size=%d hlen=%d", e.op, e.node.ID, e.node.Depth, e.node.Size, e.node.HeaderLen)
+	return fmt.Sprintf("%s id=%s depth=%d size=%d hlen=%d", e.op, e.id, e.depth, e.size, e.headerLen)
 }
 
-// scan drives the cursor over doc in chunks of the given size (the whole document
-// at once when chunk <= 0) and returns every event. The boundary rule is the one a
-// stream of concatenated unknown-size documents needs: a top-level idRoot header
-// ends the open idRoot.
+// nodeEvent records what a node states about its element. Only these fields are
+// kept, because a node is valid solely until the next pull.
+func nodeEvent(op string, n parser.Node) event {
+	return event{
+		op:        op,
+		id:        n.ID(),
+		depth:     n.Depth(),
+		offset:    n.Offset(),
+		end:       n.End(),
+		size:      n.Size(),
+		headerLen: n.HeaderLen(),
+	}
+}
+
+// scan pulls every event of doc from a cursor fed in chunks of the given size (the
+// whole document at once when chunk <= 0). The boundary rule is the one a stream of
+// concatenated unknown-size documents needs: a top-level idRoot header ends the open
+// idRoot.
 func scan(t *testing.T, doc []byte, chunk int) []event {
 	t.Helper()
 
-	var events []event
-	h := parser.HandlerFuncs{
-		MasterFunc: func(n parser.Node) (parser.Action, error) {
-			events = append(events, event{op: "master", node: n})
-			return parser.Descend, nil
-		},
-		LeafFunc: func(n parser.Node) (parser.Action, error) {
-			events = append(events, event{op: "leaf", node: n})
-			return parser.ReadPayload, nil
-		},
-		PayloadFunc: func(n parser.Node, payload []byte) error {
-			events = append(events, event{op: "payload", node: n, payload: append([]byte(nil), payload...)})
-			return nil
-		},
-		CloseFunc: func(n parser.Node) error {
-			events = append(events, event{op: "close", node: n})
-			return nil
-		},
-		BoundaryFunc: func(open, next parser.Node) bool { return next.ID == idRoot },
-	}
-
-	s := parser.NewScanner(h, classify)
+	c := parser.NewCursor(classify, parser.WithBoundary(
+		func(open, next parser.ElementID) bool { return next == idRoot }))
 	if chunk <= 0 {
 		chunk = len(doc)
 	}
-	for i := 0; i < len(doc); i += chunk {
-		end := i + chunk
-		if end > len(doc) {
-			end = len(doc)
+	pos := 0
+	feed := func() bool {
+		if pos >= len(doc) {
+			return false
 		}
-		if err := s.Feed(doc[i:end]); err != nil {
-			t.Fatalf("Feed at %d: %v", i, err)
+		end := min(pos+chunk, len(doc))
+		c.Feed(doc[pos:end])
+		pos = end
+		return true
+	}
+
+	var events []event
+	finalized := false
+	for {
+		node, err := c.Next()
+		if err != nil {
+			var needMore parser.NeedMoreData
+			switch {
+			case errors.As(err, &needMore):
+				if feed() {
+					continue
+				}
+				if finalized {
+					t.Fatalf("NeedMoreData after Finalize at offset %d", c.Offset())
+				}
+				finalized = true
+				if err := c.Finalize(); err != nil {
+					t.Fatalf("Finalize: %v", err)
+				}
+				continue
+			case errors.Is(err, io.EOF):
+				return events
+			default:
+				t.Fatalf("Next at offset %d: %v", c.Offset(), err)
+			}
+		}
+
+		switch n := node.(type) {
+		case *parser.MasterNode:
+			events = append(events, nodeEvent("master", n))
+		case *parser.LeafNode:
+			events = append(events, nodeEvent("leaf", n))
+			payload, err := n.Payload()
+			for {
+				var needMore parser.NeedMoreData
+				if !errors.As(err, &needMore) {
+					break
+				}
+				if !feed() {
+					t.Fatalf("payload of %s still needs data at end of input", n.ID())
+				}
+				payload, err = n.Payload()
+			}
+			if err != nil {
+				t.Fatalf("Payload of %s: %v", n.ID(), err)
+			}
+			ev := nodeEvent("payload", n)
+			// Payload views the cursor's buffer and the events outlive the scan,
+			// so this is where they become the test's own bytes.
+			ev.payload = bytes.Clone(payload)
+			events = append(events, ev)
+		case *parser.EndNode:
+			events = append(events, nodeEvent("close", n))
 		}
 	}
-	if err := s.Finalize(); err != nil {
-		t.Fatalf("Finalize: %v", err)
-	}
-	return events
 }
 
 func eventStrings(events []event) []string {
@@ -151,12 +204,12 @@ func TestRoundTripEventSequence(t *testing.T) {
 	// The first unknown-size master closes exactly where the second one starts, and
 	// the last one closes at end of input.
 	firstClose, secondStart, lastClose := events[13], events[14], events[17]
-	if firstClose.node.End != secondStart.node.Offset {
+	if firstClose.end != secondStart.offset {
 		t.Errorf("the first master closed at %d, want the second master's offset %d",
-			firstClose.node.End, secondStart.node.Offset)
+			firstClose.end, secondStart.offset)
 	}
-	if lastClose.node.End != int64(len(doc)) {
-		t.Errorf("the last master closed at %d, want the document length %d", lastClose.node.End, len(doc))
+	if lastClose.end != int64(len(doc)) {
+		t.Errorf("the last master closed at %d, want the document length %d", lastClose.end, len(doc))
 	}
 }
 
@@ -245,7 +298,7 @@ func TestRoundTripAllValueTypes(t *testing.T) {
 	payloads := map[parser.ElementID][]byte{}
 	for _, e := range scan(t, buf.Bytes(), 5) {
 		if e.op == "payload" {
-			payloads[e.node.ID] = e.payload
+			payloads[e.id] = e.payload
 		}
 	}
 	if got, err := parser.DecodeUint(payloads[idUintL]); err != nil || got != 1<<40 {

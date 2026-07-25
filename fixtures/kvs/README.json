@@ -125,6 +125,30 @@
       "bytes": 2390,
       "notes": "Segment boundaries detected via top-level EBML sibling, not magic scan."
     },
+    "partial_tags": {
+      "description": "Second fragment has populated partial Tags without identity keys.",
+      "fragments": 2,
+      "segments": 2,
+      "clusters": 2,
+      "simple_blocks": 2,
+      "ebml_headers": 2,
+      "unknown_size_segment": true,
+      "known_size_cluster": true,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001",
+        ""
+      ],
+      "producer_timestamps": [
+        "3200000000.000",
+        "3200000001.024"
+      ],
+      "fragment_numbers": [
+        "partial-0",
+        "partial-1"
+      ],
+      "bytes": 964,
+      "notes": "The second Segment repeats the UUID but omits ContactId and InstanceId only."
+    },
     "scaled_timestamps": {
       "description": "Non-default TimestampScale and a negative relative block timecode.",
       "fragments": 1,
@@ -246,6 +270,27 @@
       ],
       "bytes": 696,
       "notes": "Cluster closes via end_master; Segment closes only at EOF."
+    },
+    "two_tracks": {
+      "description": "One Cluster carries blocks for both named audio tracks.",
+      "fragments": 1,
+      "segments": 1,
+      "clusters": 1,
+      "simple_blocks": 3,
+      "ebml_headers": 1,
+      "unknown_size_segment": true,
+      "known_size_cluster": true,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "producer_timestamps": [
+        "1100000000.000"
+      ],
+      "fragment_numbers": [
+        "two-track-0"
+      ],
+      "bytes": 636,
+      "notes": "Track 1 uses two blocks of 24 and 16 bytes; Track 2 uses one block of 32 bytes."
     },
     "unknown_elements": {
       "description": "Segment carrying an unregistered leaf and an unregistered master-shaped element.",

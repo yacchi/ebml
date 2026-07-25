@@ -346,6 +346,71 @@ func TestStructuralErrorIsTerminalWithoutResync(t *testing.T) {
 	}
 }
 
+// truncatedStream is a complete fragment with its last two bytes cut off, so the
+// stream ends INSIDE the final SimpleBlock's declared payload: Feed cannot fault it
+// -- more bytes would finish the element -- and it is Finalize that diagnoses the
+// truncation.
+func truncatedStream() []byte {
+	raw := synFragment(
+		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
+		synCluster(0, synSimpleBlock(1, 0, []byte{0x01, 0x02, 0x03, 0x04})),
+	)
+	return raw[:len(raw)-2]
+}
+
+// TestFailingFinalizeLatchesForLaterFeed pins which of the two "no more input"
+// conditions a later Feed is answered with. A Finalize that FAILS both latches the
+// terminal failure and marks the assembler finalized, so a Feed after it can be
+// answered two ways -- and only one of them is the documented contract: once a
+// terminal failure is latched, every later call reports THAT failure. Answering with
+// a fresh "already finalized" invalid-use error instead would throw the diagnosis
+// away and blame the caller for the stream's defect.
+func TestFailingFinalizeLatchesForLaterFeed(t *testing.T) {
+	a := fragment.New()
+	if _, err := a.Feed(truncatedStream()); err != nil {
+		t.Fatalf("Feed of a truncated stream = %v; the bytes so far are readable", err)
+	}
+	_, err := a.Finalize()
+	if !errors.Is(err, parser.ErrTruncated) {
+		t.Fatalf("Finalize = %v, want the truncation diagnosis", err)
+	}
+
+	if _, err2 := a.Feed(nil); !errors.Is(err2, parser.ErrTruncated) {
+		t.Fatalf("Feed after a failing Finalize = %v, want the latched %v", err2, err)
+	}
+	if _, err3 := a.Finalize(); !errors.Is(err3, parser.ErrTruncated) {
+		t.Fatalf("Finalize after a failing Finalize = %v, want the latched %v", err3, err)
+	}
+}
+
+// TestFeedAfterCleanFinalizeIsInvalidUse is the other order, and the reason the
+// "already finalized" error is still worth having: nothing failed, so there is no
+// latched error to report, and feeding a stream the caller itself declared over is a
+// programmer error rather than a property of the bytes.
+func TestFeedAfterCleanFinalizeIsInvalidUse(t *testing.T) {
+	raw := synFragment(
+		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
+		synCluster(0, synSimpleBlock(1, 0, []byte{0x01, 0x02})),
+	)
+
+	a := fragment.New()
+	if _, err := a.Feed(raw); err != nil {
+		t.Fatalf("Feed: %v", err)
+	}
+	if _, err := a.Finalize(); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+
+	_, err := a.Feed(nil)
+	var invalid parser.Invalid
+	if !errors.As(err, &invalid) {
+		t.Fatalf("Feed after a clean Finalize = %v, want a parser.Invalid", err)
+	}
+	if !strings.Contains(err.Error(), "already finalized") {
+		t.Fatalf("Feed after a clean Finalize = %v, want the already-finalized diagnosis", err)
+	}
+}
+
 // TestWithResyncRecoversFromSplicedGarbage checks opt-in recovery: garbage between
 // two Segments costs the bytes it occupies and nothing else -- the fragment after
 // it is assembled normally, and the loss is reported with a non-zero skipped count.
@@ -422,9 +487,9 @@ func TestWithResyncRecoversFromSplicedGarbage(t *testing.T) {
 			if !parser.IsStructural(rec.cause) {
 				t.Fatalf("cause = %v, want a structural classification", rec.cause)
 			}
-			var he *parser.HandlerError
-			if errors.As(rec.cause, &he) {
-				t.Fatalf("cause = %v, want no handler origin", rec.cause)
+			var ce *parser.ContentError
+			if errors.As(rec.cause, &ce) {
+				t.Fatalf("cause = %v, want no content origin", rec.cause)
 			}
 
 			if len(frags) != 2 {
@@ -547,14 +612,14 @@ func TestContentErrorIsTerminalEvenWithResync(t *testing.T) {
 			if parser.IsStructural(err) {
 				t.Fatalf("error %v is classified structural, but the stream's shape was read correctly", err)
 			}
-			var he *parser.HandlerError
-			if !errors.As(err, &he) {
-				t.Fatalf("error = %v (%T), want a *parser.HandlerError from the payload event", err, err)
+			var ce *parser.ContentError
+			if !errors.As(err, &ce) {
+				t.Fatalf("error = %v (%T), want a *parser.ContentError for the payload", err, err)
 			}
-			if he.Op != parser.OpPayload || he.Node.ID != matroska.IDSimpleBlock {
-				t.Fatalf("HandlerError = %+v, want the %s event of a SimpleBlock", he, parser.OpPayload)
+			if ce.ID != matroska.IDSimpleBlock {
+				t.Fatalf("ContentError = %+v, want the undecodable SimpleBlock", ce)
 			}
-			if !strings.Contains(err.Error(), "SimpleBlock at offset") {
+			if !strings.Contains(err.Error(), "SimpleBlock") || !strings.Contains(err.Error(), "offset") {
 				t.Fatalf("error %q does not say which SimpleBlock failed", err)
 			}
 			// The fragment that completed before the bad block is still delivered,
@@ -565,15 +630,15 @@ func TestContentErrorIsTerminalEvenWithResync(t *testing.T) {
 
 			// Terminal: the assembler does not resume, from Feed or from Finalize.
 			more, err2 := a.Feed(nil)
-			if !errors.As(err2, &he) {
-				t.Fatalf("a later Feed = %v, want the same terminal handler error", err2)
+			if !errors.As(err2, &ce) {
+				t.Fatalf("a later Feed = %v, want the same terminal content error", err2)
 			}
 			if len(more) != 0 {
 				t.Fatalf("a later Feed emitted %d fragments, want 0", len(more))
 			}
 			tail, err3 := a.Finalize()
-			if !errors.As(err3, &he) {
-				t.Fatalf("Finalize = %v, want the same terminal handler error", err3)
+			if !errors.As(err3, &ce) {
+				t.Fatalf("Finalize = %v, want the same terminal content error", err3)
 			}
 			if len(tail) != 0 {
 				t.Fatalf("Finalize emitted %d fragments, want 0", len(tail))
@@ -582,6 +647,206 @@ func TestContentErrorIsTerminalEvenWithResync(t *testing.T) {
 				t.Fatalf("notify called %d times by the end, want 0", recoveries)
 			}
 		})
+	}
+}
+
+// skipped is one call of WithSkipContentErrors' notify.
+type skipped struct {
+	id     parser.ElementID
+	offset int64
+	cause  error
+}
+
+// TestWithSkipContentErrorsDropsOneElement is the content counterpart of
+// TestWithResyncRecoversFromSplicedGarbage: an undecodable SimpleBlock costs that
+// ELEMENT and nothing else. The structural position was never in doubt, so the
+// Fragment is still emitted -- with the blocks that did decode -- and the stream
+// continues into the next fragment.
+func TestWithSkipContentErrorsDropsOneElement(t *testing.T) {
+	first := synFragment(
+		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
+		synTags("ContactId", "first"),
+		synCluster(0,
+			synSimpleBlock(1, 0, []byte{0x01}),
+			synBadSimpleBlock(),
+			synSimpleBlock(1, 2, []byte{0x03}),
+		),
+	)
+	second := synFragment(
+		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
+		synTags("ContactId", "second"),
+		synCluster(7, synSimpleBlock(1, 0, []byte{0x04})),
+	)
+	raw := ebmltest.Concat(first, second)
+
+	for _, sp := range []struct {
+		label  string
+		chunks [][]byte
+	}{
+		{"whole", [][]byte{raw}},
+		{"one_byte", splitOneByte(raw)},
+		{"fibonacci", splitFibonacci(raw)},
+	} {
+		t.Run(sp.label, func(t *testing.T) {
+			var drops []skipped
+			frags := run(t, sp.chunks, fragment.WithSkipContentErrors(
+				func(id parser.ElementID, offset int64, cause error) {
+					drops = append(drops, skipped{id, offset, cause})
+				})).all()
+
+			if len(frags) != 2 {
+				t.Fatalf("got %d fragments, want 2 (neither fragment is lost)", len(frags))
+			}
+			if len(drops) != 1 {
+				t.Fatalf("got %d dropped elements, want exactly 1: %+v", len(drops), drops)
+			}
+			drop := drops[0]
+			if drop.id != matroska.IDSimpleBlock {
+				t.Fatalf("dropped element = %s, want the SimpleBlock", drop.id)
+			}
+			// The offset identifies the element, and therefore the fragment it sits
+			// in: it is the retained node's own offset in the original stream.
+			retained := frags[0].Cluster.ChildrenByID(matroska.IDSimpleBlock)
+			if len(retained) != 3 {
+				t.Fatalf("Cluster retained %d SimpleBlocks, want 3 (the shape keeps the dropped one)", len(retained))
+			}
+			if drop.offset != retained[1].Offset {
+				t.Fatalf("notified offset %d, want the bad block's offset %d", drop.offset, retained[1].Offset)
+			}
+			var ce *parser.ContentError
+			if !errors.As(drop.cause, &ce) {
+				t.Fatalf("cause = %v (%T), want the *parser.ContentError Feed would have returned", drop.cause, drop.cause)
+			}
+			if ce.ID != matroska.IDSimpleBlock || ce.Offset != drop.offset {
+				t.Fatalf("cause = %+v, want it to name the same element", ce)
+			}
+			if parser.IsStructural(drop.cause) {
+				t.Fatalf("cause %v is classified structural; a content verdict never is", drop.cause)
+			}
+			if !strings.Contains(drop.cause.Error(), "SimpleBlock") {
+				t.Fatalf("cause %q does not say what failed", drop.cause)
+			}
+
+			// Only the offending block is gone: the two good ones are decoded, in
+			// stream order, and the fragment's metadata is untouched.
+			if len(frags[0].Blocks) != 2 {
+				t.Fatalf("fragment 0 has %d blocks, want the 2 that decoded", len(frags[0].Blocks))
+			}
+			if got := frags[0].TrackPCM(1); !reflect.DeepEqual(got, []byte{0x01, 0x03}) {
+				t.Fatalf("fragment 0 PCM = %x, want 0103", got)
+			}
+			if got, _ := frags[0].Tag("ContactId"); got != "first" {
+				t.Fatalf("fragment 0 ContactId = %q", got)
+			}
+			if got, _ := frags[1].Tag("ContactId"); got != "second" {
+				t.Fatalf("fragment 1 ContactId = %q", got)
+			}
+			if got := frags[1].TrackPCM(1); !reflect.DeepEqual(got, []byte{0x04}) {
+				t.Fatalf("fragment 1 PCM = %x, want 04", got)
+			}
+		})
+	}
+}
+
+// TestWithSkipContentErrorsNilNotifyStaysTerminal checks the option cannot make a
+// failure disappear quietly: with a nil notify there is nobody to report a dropped
+// element to, so the content error is terminal exactly as by default.
+func TestWithSkipContentErrorsNilNotifyStaysTerminal(t *testing.T) {
+	raw := synFragment(
+		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
+		synCluster(0, synBadSimpleBlock()),
+	)
+
+	a := fragment.New(fragment.WithSkipContentErrors(nil))
+	frags, err := a.Feed(raw)
+	var ce *parser.ContentError
+	if !errors.As(err, &ce) {
+		t.Fatalf("Feed = %v (%T), want the *parser.ContentError the default reports", err, err)
+	}
+	if len(frags) != 0 {
+		t.Fatalf("got %d fragments, want 0", len(frags))
+	}
+	if _, err2 := a.Feed(nil); !errors.As(err2, &ce) {
+		t.Fatalf("a later Feed = %v, want the same terminal content error", err2)
+	}
+}
+
+// TestWithSkipContentErrorsLeavesStructuralFailuresAlone checks the division of
+// labour from the other side: this option covers the CONTENT class only, so a
+// structural failure stays terminal and its notify is never called.
+func TestWithSkipContentErrorsLeavesStructuralFailuresAlone(t *testing.T) {
+	good := synFragment(
+		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
+		synCluster(0, synSimpleBlock(1, 0, []byte{0x01})),
+	)
+	raw := ebmltest.Concat(good, []byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77}, good)
+
+	var drops int
+	a := fragment.New(fragment.WithSkipContentErrors(func(parser.ElementID, int64, error) { drops++ }))
+	frags, err := a.Feed(raw)
+	if err == nil {
+		t.Fatal("Feed of a structurally damaged stream must report an error")
+	}
+	if !parser.IsStructural(err) {
+		t.Fatalf("error %v is not classified structural", err)
+	}
+	if drops != 0 {
+		t.Fatalf("notify called %d times, want 0: a structural failure is WithResync's business", drops)
+	}
+	if len(frags) != 1 {
+		t.Fatalf("got %d fragments, want the 1 that completed before the damage", len(frags))
+	}
+	if _, err2 := a.Feed(nil); !parser.IsStructural(err2) {
+		t.Fatalf("a later Feed = %v, want the same terminal structural error", err2)
+	}
+}
+
+// TestSkipContentErrorsAndResyncCoverOneClassEach sets both options and damages the
+// stream both ways: each notify hears about its own class and nothing else, and the
+// stream survives both.
+func TestSkipContentErrorsAndResyncCoverOneClassEach(t *testing.T) {
+	first := synFragment(
+		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
+		synCluster(0, synSimpleBlock(1, 0, []byte{0x01}), synBadSimpleBlock()),
+	)
+	second := synFragment(
+		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
+		synCluster(7, synSimpleBlock(1, 0, []byte{0x02})),
+	)
+	garbage := []byte{0x00, 0x11, 0x22, 0x33}
+	raw := ebmltest.Concat(first, garbage, second)
+
+	var drops []skipped
+	var resyncs int
+	frags := run(t, [][]byte{raw},
+		fragment.WithSkipContentErrors(func(id parser.ElementID, offset int64, cause error) {
+			drops = append(drops, skipped{id, offset, cause})
+		}),
+		fragment.WithResync(func(offset, skipped int64, cause error) {
+			resyncs++
+			if !parser.IsStructural(cause) {
+				t.Errorf("resync cause = %v, want a structural failure", cause)
+			}
+		}),
+	).all()
+
+	if len(frags) != 2 {
+		t.Fatalf("got %d fragments, want 2", len(frags))
+	}
+	if len(drops) != 1 {
+		t.Fatalf("got %d dropped elements, want 1: %+v", len(drops), drops)
+	}
+	if resyncs != 1 {
+		t.Fatalf("got %d recoveries, want 1", resyncs)
+	}
+	if parser.IsStructural(drops[0].cause) {
+		t.Fatalf("dropped element cause %v must not be structural", drops[0].cause)
+	}
+	if got := frags[0].TrackPCM(1); !reflect.DeepEqual(got, []byte{0x01}) {
+		t.Fatalf("fragment 0 PCM = %x, want 01", got)
+	}
+	if got := frags[1].TrackPCM(1); !reflect.DeepEqual(got, []byte{0x02}) {
+		t.Fatalf("fragment 1 PCM = %x, want 02", got)
 	}
 }
 
@@ -599,9 +864,9 @@ func TestContentErrorIsTerminalWithoutResync(t *testing.T) {
 	if err == nil {
 		t.Fatal("Feed must report the undecodable SimpleBlock")
 	}
-	var he *parser.HandlerError
-	if !errors.As(err, &he) {
-		t.Fatalf("error = %v (%T), want a *parser.HandlerError", err, err)
+	var ce *parser.ContentError
+	if !errors.As(err, &ce) {
+		t.Fatalf("error = %v (%T), want a *parser.ContentError", err, err)
 	}
 	if len(frags) != 0 {
 		t.Fatalf("got %d fragments, want 0 (the only Cluster never completed)", len(frags))

@@ -14,14 +14,15 @@ import (
 // keeps working.
 //
 // It is NOT the classification test. Ask IsStructural instead: the class has a
-// boundary at the handler, and a sentinel cannot express one.
+// boundary at the consumer, and a sentinel cannot express one.
 //
 // Two things are deliberately NOT structural:
 //
 //   - NeedMoreData is not a failure at all. It is the cursor asking for the rest
-//     of an element and never reaches a Scanner caller.
-//   - An error a Handler returned is the consumer's own verdict about CONTENT,
-//     not about the stream's shape, whatever error value the handler chose.
+//     of an element.
+//   - An error a consumer raised about an element's CONTENT -- marked as such with
+//     ContentError -- is not about the stream's shape, whatever error value the
+//     consumer chose.
 //
 // The distinction is what a consumer with a recovery strategy needs: scanning
 // bytes forward for the next plausible element can only be justified after a
@@ -37,25 +38,25 @@ var ErrStructural = errors.New("structural EBML error")
 //
 // It is a predicate, not a sentinel comparison, because the class has a BOUNDARY
 // that errors.Is cannot express. errors.Is traverses the whole Unwrap chain, so it
-// can never stop anywhere: a Handler is free to return ErrStructural itself, or
-// Invalid, or TruncatedError, or anything wrapping them, and
-// errors.Is(scannerErr, ErrStructural) would then answer true even though the
-// cursor read the stream's shape perfectly and the refusal was the consumer's own.
-// IsStructural owns the rule instead: it walks the chain and answers false the
-// moment it crosses a *HandlerError, whatever that handler error carries.
-// NeedMoreData is not a failure at all, so it is false as well.
+// can never stop anywhere: a consumer's verdict about an element's content is free
+// to carry ErrStructural itself, or Invalid, or TruncatedError, or anything
+// wrapping them, and errors.Is(err, ErrStructural) would then answer true even
+// though the cursor read the stream's shape perfectly and the refusal was the
+// consumer's own. IsStructural owns the rule instead: it walks the chain and
+// answers false the moment it crosses a *ContentError, whatever that error
+// carries. NeedMoreData is not a failure at all, so it is false as well.
 //
-// A consumer classifying an error that may have passed through a Handler --
-// anything out of Scanner.Feed or Scanner.Finalize -- must use this predicate.
+// A consumer classifying an error that may have come from a layer above the cursor
+// -- anything out of ext/fragment.Assembler.Feed, say -- must use this predicate.
 func IsStructural(err error) bool {
 	for err != nil {
 		if err == ErrStructural {
 			return true
 		}
 		switch err.(type) {
-		case *HandlerError:
-			// The handler boundary: a handler-originated failure is never
-			// structural, so the chain below it is not consulted at all.
+		case *ContentError:
+			// The consumer boundary: a verdict about content is never structural,
+			// so the chain below it is not consulted at all.
 			return false
 		case NeedMoreData:
 			return false
@@ -75,6 +76,54 @@ func IsStructural(err error) bool {
 		}
 	}
 	return false
+}
+
+// ContentError marks an error as a CONSUMER's verdict about an element's content
+// rather than a failure of the cursor. The bytes were read correctly; what they
+// mean was refused -- a SimpleBlock payload that will not decode, a value outside
+// the range the consumer accepts.
+//
+// It is the other half of the error classification IsStructural implements, and the
+// reason the core offers it at all: the cursor cannot produce this error, since a
+// pull loop never runs consumer code, but IsStructural has to be able to answer
+// "is the stream broken?" for an error a consumer built and passed on. Wrapping the
+// verdict in this type is what makes the answer no.
+//
+// An error carrying this wrapper is NEVER structural, whatever value it carries:
+// IsStructural stops at this boundary, so a consumer that reports ErrStructural,
+// Invalid or TruncatedError verbatim is still classified as content-originated.
+// Unwrap reports the consumer's own error, so errors.Is and errors.As still reach
+// its sentinels and types through the wrapper unchanged -- that reachability is
+// deliberate, and only the classification question stops here.
+//
+// The distinction is what a consumer with a recovery strategy needs: scanning bytes
+// forward for the next plausible element can only be justified after a structural
+// failure, because only then has the cursor lost the ability to locate the next
+// element. A content error is terminal -- see ext/fragment.WithResync, whose whole
+// gate is IsStructural.
+//
+// ID and Offset locate the element the verdict is about, so the failure is
+// findable in the stream without the consumer restating it.
+type ContentError struct {
+	ID     ElementID
+	Offset int64
+	Err    error
+}
+
+func (e *ContentError) Error() string {
+	return fmt.Sprintf("content of element %s at offset %d: %v", e.ID, e.Offset, e.Err)
+}
+
+func (e *ContentError) Unwrap() error { return e.Err }
+
+// NewContentError marks err as a consumer's verdict about the content of the
+// element with the given ID at the given absolute offset; see ContentError. A nil
+// err stays nil, so it can wrap a call's result directly.
+func NewContentError(id ElementID, offset int64, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &ContentError{ID: id, Offset: offset, Err: err}
 }
 
 // structuralSentinel is a sentinel that reports itself as ErrStructural. Every
@@ -205,8 +254,7 @@ func (e VINTLengthError) Unwrap() error {
 
 // NeedMoreData reports that the operation needs at least MinBytes more input
 // bytes to decide. It is flow control, not corruption: IsStructural is false for
-// it and a Scanner absorbs it rather than returning it, since more Feed calls are
-// the answer.
+// it, and the answer to it is the next Feed -- or Finalize, once the input is over.
 type NeedMoreData struct {
 	MinBytes int
 }

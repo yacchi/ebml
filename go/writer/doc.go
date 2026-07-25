@@ -48,6 +48,13 @@
 //     closes the master when an element appears that cannot be its child, or at
 //     EOF. Many readers tolerate it only on Segment and Cluster.
 //
+// A non-seekable sink such as an io.Pipe adds one requirement, on the CALLER rather
+// than on the Writer: the goroutine draining the read end must ALREADY be running
+// before the first write reaches the sink, since an unread pipe write blocks
+// forever. New writes nothing, so that first write is the first StartMaster — which
+// UnknownSize on a pipe hits immediately, its header going out before any child is
+// written.
+//
 // # When bytes reach the sink
 //
 // A Writer performs no output buffering of its own. Bytes reach the sink during

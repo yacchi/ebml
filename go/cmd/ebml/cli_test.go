@@ -74,6 +74,34 @@ func TestDumpKVSTopology(t *testing.T) {
 	}
 }
 
+// TestDumpMaxBinaryZeroPrintsSizeOnly pins the deliberate use of the cursor's lazy
+// default: with --max-binary 0 no byte of a binary or block leaf would be printed,
+// so the dump states its size and never asks the cursor for the payload at all.
+func TestDumpMaxBinaryZeroPrintsSizeOnly(t *testing.T) {
+	raw := loadFixture(t, "kvs/topology_basic.ebml.hex")
+	var out bytes.Buffer
+	if err := runDump(bytes.NewReader(raw), &out, dumpOptions{maxBinary: 0}); err != nil {
+		t.Fatalf("runDump: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"SimpleBlock (0xA3) [type block, offset 582, size 36] = binary 36 bytes\n",
+		// A scalar leaf is still read: its value is what the dump prints.
+		`DocType (0x4282) [type string, offset 13, size 8] = "matroska"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dump output missing %q\n%s", want, got)
+		}
+	}
+	// "binary N bytes: <hex>" is the materialised form; nothing may print it here.
+	if strings.Contains(got, "bytes: ") {
+		t.Errorf("--max-binary 0 printed payload bytes:\n%s", got)
+	}
+	if strings.Contains(got, "track=") {
+		t.Errorf("--max-binary 0 decoded a block payload it was not going to print:\n%s", got)
+	}
+}
+
 func TestXMLKVSTopology(t *testing.T) {
 	raw := loadFixture(t, "kvs/topology_basic.ebml.hex")
 	var out bytes.Buffer

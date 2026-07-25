@@ -2,18 +2,18 @@
 
 This document specifies the portable core of `ebml`. It is a behavioral
 contract for incremental EBML readers; it is not a document-model or retention
-API. The core consists of a cursor with events and flow control, plus a separate
-element registry and classifier.
+API. The core consists of an explicitly pull-driven cursor with distinguishable
+events and flow control, plus a separate element registry and classifier.
 
 ## Relation to existing models
 
-The reading core is a **pull cursor**, equivalent to the cursor flavour of StAX,
-but in its asynchronous form: input is pushed as chunks, and the cursor reports
-need-more-data instead of blocking on a stream. Its event and handler layer is
-shaped like SAX, but adds pruning authority that SAX lacks: on the header, the
-handler decides whether to descend and whether a leaf payload is delivered. The
-retained tree in the optional layer plays the DOM role and is outside this
-contract.
+The reading core is an explicitly **pull-driven cursor**, closer to the cursor
+flavour of StAX than to a callback reader. Input is pushed as chunks, and one
+event is acquired at a time; the cursor reports need-more-data instead of
+blocking on a stream. The former SAX-shaped callback layer is gone. On each
+header, the consumer decides whether to descend and whether a leaf payload is
+materialised, while keeping its state in local variables. The retained tree in
+the optional layer still plays the DOM role and is outside this contract.
 
 The analogy is inexact in several EBML-specific ways. Explicit element sizes
 make extents first-class, so skipping a subtree is arithmetic rather than a
@@ -79,6 +79,37 @@ implementation need not provide writing.
 > `StartMaster`, `EndMaster`, `Buffered`, `Reserved`, `UnknownSize`, and the
 > value methods `Uint`, `Int`, `Float`, `String`, `UTF8`, `Date`, `Binary`, and
 > `Leaf`. Package `ext/tree` provides `Marshal` and `MarshalBytes`.
+
+### SimpleBlock payload codec
+
+A Matroska SimpleBlock's payload is itself a normative payload codec nested
+inside one binary leaf value, distinct from the surrounding EBML structure: a
+track-number VINT, a signed 16-bit relative timecode, one flags byte, and one or
+more frames. Unlaced, the payload after the flags byte is the single frame in
+full. Laced, a frame-count byte follows the flags byte (the encoded count is one
+less than the actual count), then a size table in the form the declared lacing
+prescribes, then the concatenated frame bytes, with the last frame's size implied
+by what remains of the payload. Four lacing forms exist: no lacing, one frame;
+Xiph lacing, each non-last frame's size as a run of value-255-terminated bytes;
+fixed lacing, no size table at all because every frame but the last shares one
+size; and EBML lacing, the first frame's size as a VINT and each following size
+as a VINT-encoded signed delta from the previous frame's size.
+
+An implementation that offers writing should provide the inverse encoder
+alongside its SimpleBlock decoder. Because a decoder may accept liberalizations a
+byte-exact re-encoding cannot reproduce — a non-minimal size VINT, or a reserved
+flag bit — re-encoding a decoded value is a CANONICAL encoding rather than
+necessarily byte-identical to arbitrary input: the canonical encoding of a laced
+block parses back to a decoded value equal to the original, and is byte-identical
+to the original payload whenever that payload was already canonical. The
+conformance corpus's SimpleBlock payloads are all canonical, so for every one of
+them decode-then-encode round-trips byte for byte.
+
+> **Go mapping (non-normative):** `parser.ParseSimpleBlock` decodes a SimpleBlock
+> payload into `*parser.SimpleBlock`; `(*parser.SimpleBlock).Append` is its exact
+> inverse. Every SimpleBlock payload in the fixture corpus round-trips byte for
+> byte through the pair; a laced block re-encodes to the canonical form of an
+> equal decoded value.
 
 ## 1. Data model
 
@@ -159,51 +190,149 @@ The conceptual operations are:
   offset to preserve absolute offsets.
 
 Operations that do not fit the current cursor state are invalid. A cursor that
-reports a terminal structural or handler error remains failed. The two are
-distinct classes a consumer must be able to separate; see "Error classification"
-in section 6.
+reports a terminal structural error remains failed. A consumer's own verdict about
+an element's content is a distinct class a consumer must be able to separate from
+it; see "Error classification" in section 6.
 
 ## 3. Event model
 
-The event-driven interface reports a master or leaf on its header, optionally a
-leaf payload after the payload has arrived, and a close for every master that
-was entered. A skipped master has no descendant events and no close event.
+Event acquisition is a **pull operation**: each operation reports one next event,
+or one of the non-event outcomes of section 6: need-more-data, end of input, or a
+structural failure. There are exactly three distinguishable event kinds:
 
-Each element event carries:
+* a **master start** (its header), on which the consumer decides descend or skip
+  subtree;
+* a **leaf header**, on which it decides materialise payload or skip payload;
+* a **master end**, for every master that was entered.
+
+A skipped master has no descendant events and no end event. Every event carries:
 
 | Field | Meaning |
 | --- | --- |
 | element ID | Complete encoded ID VINT, including marker bits |
-| kind | Classifier result: `master`, `uint`, or `binary` for an element header; `end_master` for a close observation; `unknown` if the classifier does not recognize the element ID |
+| kind | The classifier's verdict for this element (`master`, `uint`, `binary`, or `unknown` when it does not recognize the ID), which is what decides whether a header is a master or a leaf event; `end_master` on a master end. It must be reported, not merely used: an implementation that told the consumer only which of the three events this is would hide every distinction the classifier drew among leaves |
 | depth | Number of enclosing entered masters; top-level is zero |
 | header start offset | Absolute offset of the first header byte |
 | header length | Encoded ID length plus encoded size length |
 | declared size | Payload length, or unknown size |
 | end offset | One past the declared element extent when known; unknown until a master closes when size is unknown |
-| enclosing-master chain | IDs of enclosing entered masters, outermost first |
 
-A close event carries the closed master's identity, depth, header location,
-declared size, enclosing-master chain, and the concrete offset at which it
-closed. For a known-size master this is observable immediately when its declared
-payload bytes have been consumed, regardless of any enclosing unknown-size
-master.
+The kind on an event is the **structural** verdict, and that division of labour is
+deliberate. It is the classifier's answer that the reader itself acted on — master
+versus leaf, plus the end-of-master marker — and it is reported so a consumer can
+see what the element was read by. It is **not** the value type to interpret a
+payload as: a classifier only has to separate masters from leaves for a stream to be
+read correctly, so its leaf kinds are whatever it chose to distinguish and no more.
+A consumer that wants to **decode** a payload asks the registry of section 5 for the
+element's value type, never the event's kind, since an unlisted or deliberately
+opaque element classifies as a binary or unknown leaf and that says nothing about
+the bytes.
+
+A master-end event carries the closed master's identity, depth, header location,
+declared size, and the concrete offset at which it closed. For a known-size master
+this is observable immediately when its declared payload bytes have been consumed,
+regardless of any enclosing unknown-size master.
+
+The enclosing-master chain is deliberately **not** part of an event: a pull
+consumer that needs ancestry maintains it in its own loop, pushing on a descended
+master and popping on its end, which the depth on every event makes verifiable.
+An implementation must not require a per-event allocation to report ancestry.
+
+An event **is** invalidated by the following pull, so the values above must be read
+(or copied) before then. An implementation must state that rule and **must detect**
+every use of an invalidated event, without exception: every operation an event offers
+— the field accessors above exactly as much as the flow-control decisions of section 4
+— is required to reject a use that happens after the following event has been
+acquired. The requirement does not depend on how the consumer held the event, nor on
+what the current event is: a handle the implementation delivered, an independent copy
+of it, and a handle held while the current event is of the **same kind** as the one it
+names are all invalidated alike. Silently answering such a use, so that a consumer
+observes the values of a later event through a handle it took earlier, is prohibited.
+Rejection reports a consumer defect and is therefore not one of the outcomes of
+section 6: no further input can repair it, and the position of the next event is
+unaffected.
+
+Total detection constrains delivery. An event must be delivered either as an
+independent value or as a handle onto storage the implementation does not reuse for a
+later event, because a handle onto **reused** storage *is* that storage: once it has
+been refilled for a later event of the same kind, the handle denotes the live event
+and nothing distinguishes it from a handle taken for that event, so the detection
+required above becomes impossible. Reuse therefore may not be used to avoid a
+per-event allocation here. That allocation is bounded — one event's worth of identity
+and extent, no payload and no ancestry — and buying detection with it is the trade
+this section mandates: an undetectable stale event lets a consumer read one element's
+values believing them to be another's, which no error path can later reveal. An
+implementation that also offers a lower-level surface reporting each header as a
+plain value, which hands out no event object at all, must say so, since that is where
+a consumer unwilling to pay goes.
+
+Delivered payload bytes (section 4) carry the same lifetime. They may alias the
+implementation's own buffer, so they are valid only until the following event is
+acquired and must not be modified; a consumer that needs them beyond that, or needs
+to change them, copies them first. An implementation must not expose its own record
+of a delivered payload: repeating the request within the event's lifetime must
+reproduce the delivered bytes, and a consumer that modifies them must not be able to
+alter the reader's state.
+
+> **Go mapping (non-normative):** `parser.Cursor` with `Next`, `Feed`, `Finalize`,
+> `Offset`, `Depth`, `Unconsumed`, `Err`, and the `Nodes` iterator. The event is a
+> closed `parser.Node` interface over `*MasterNode` (`Descend`, `Skip`), `*LeafNode`
+> (`Payload`, `Skip`) and `*EndNode` (`Start`), so an operation invalid for an event
+> cannot be written: a leaf payload cannot be requested from a master. The iterator
+> is sugar only — a range loop cannot distinguish need-more-data from end of input,
+> and that distinction is normative here, so `Next` keeps it explicit. The
+> classifier's verdict is `Node.Kind`, a `parser.Kind` on all three variants
+> (`KindEndMaster` on an `*EndNode`); a consumer decoding a payload takes its value
+> type from `matroska.TypeFor` instead. Invalidation is
+> a generation counter the cursor bumps on `Next` and `Finalize` — never on `Feed`,
+> since a node has to survive the chunk that completes its payload — and stamps into
+> the node it hands out; every exported node method, the extent accessors included,
+> compares the stamp and panics on a mismatch. `Next` allocates a new node per event,
+> so a node the cursor has moved past keeps its own stamp and every retention of it is
+> caught: the `*MasterNode`/`*LeafNode`/`*EndNode` pointer the cursor returned, a node
+> value the consumer copied (`v := *node`), and either of those while the current event
+> is of the same variant. The measured price is one allocation per event and nothing
+> else — reading every accessor adds none, and `Payload` adds none — asserted in
+> `parser/node_validity_test.go` and priced against the low-level `parser.Parser`, which
+> reports each header as an `ElementHeader` value, by `BenchmarkCursorScan` and
+> `BenchmarkParserScan`. Read what you need, or copy the node, before pulling again.
+> `LeafNode.Payload` returns a view of the cursor's buffer and keeps only that view's
+> extent, never the slice it handed out.
 
 ## 4. Flow control
 
-The handler decides on the header, before payload bytes need to be present:
+The consumer decides on the event it is holding, before requesting the next event
+and before payload bytes need to be present:
 
 * For a master, choose **descend** or **skip subtree**.
-* For a leaf, choose **deliver payload** or **skip payload**.
+* For a leaf, choose **materialise payload** or **skip payload**.
+
+Every event must offer exactly the operations that are valid for it, so that
+requesting a leaf payload from a master, or deciding twice on one event, cannot be
+expressed rather than merely being reported as an error.
+
+Taking no decision at all is legal, and the defaults are the cheap ones: an
+undecided master is descended into, and an undecided leaf has its payload skipped.
+A consumer therefore materialises exactly the payloads it asks for, and it does not
+pay to look at even those: delivered bytes may alias the reader's own buffer, so a
+scan that reads every payload copies none of them. A payload request may report
+need-more-data because the leaf header is available before its payload. The event
+remains valid across additional input, so the consumer retries that same request
+after feeding more data.
 
 The cursor must retain only the state needed to continue the scan. In particular,
 a consumer can skip bulk media without buffering it. The decision is made once,
-on the header, and is carried out as later chunks arrive. Therefore every
-chunking of the same byte stream produces the same decisions and event sequence:
-the scan is split-invariant.
+on the header, and is carried out as later chunks arrive: a consumer is never
+asked about the same element twice, and a payload whose bytes have not all arrived
+reports need-more-data without invalidating the event, so the request is simply
+retried after the next chunk. Therefore every chunking of the same byte stream
+produces the same decisions and event sequence: the scan is split-invariant.
 
-An optional boundary decider receives the open unknown-size master and the next
-element header. Returning true closes that master before the next element is
-re-examined at the enclosing depth.
+An optional boundary rule receives the open unknown-size master and the ID of the
+next element. Returning true closes that master — its end event is reported first —
+before the next element is reported at the enclosing depth. The rule belongs to the
+cursor as a whole, not to an individual event: a per-event answer would let the same
+stream be split differently depending on where the consumer happened to look.
 
 ## 5. Classification and registry
 
@@ -220,7 +349,7 @@ default when none is given: a default would classify an element the consumer's
 registry does know as a leaf, so a master such as a `Cluster` would be read as
 one opaque payload — a structural misreading that produces no error. A missing
 classifier is a programmer error and must be rejected immediately and visibly at
-construction (in Go: `parser.New` and `parser.NewScanner` take the classifier as
+construction (in Go: `parser.New` and `parser.NewCursor` take the classifier as
 a required argument and panic on `nil`).
 
 A registry is the separate source of element knowledge. It maps IDs to names and
@@ -256,45 +385,58 @@ enumerating concrete types.
   fit the current state. After one, the position of the next element is unknown,
   so the cursor is failed and stays failed. This is the only class after which a
   consumer may justifiably scan bytes forward for a resume point.
-* **Handler-originated.** An error returned by a consumer's own handler from an
-  element, payload, or close event. The bytes were read correctly; the consumer
-  refused their content. It aborts the scan and is reported to the caller
-  unchanged, but it is not a statement about the stream's shape, so it must never
-  be classified as structural and must never authorize byte scanning.
+* **Content (consumer-originated).** A verdict a CONSUMER reached about what an
+  element's bytes mean — a payload that will not decode, a value it refuses. The
+  bytes were read correctly. Since a pull cursor never runs consumer code, the
+  cursor cannot raise this error; the consumer raises it and passes it on, so the
+  implementation must offer a wrapper that MARKS the class. It is not a statement
+  about the stream's shape, so it must never be classified as structural and must
+  never authorize byte scanning.
 * **Need more data.** Not a failure. The cursor needs more input to decide, and
-  the answer is the next chunk. It is excluded from both classes above, and the
-  event-driven interface absorbs it rather than reporting it.
+  the answer is the next chunk, or finalization once the input is over.
+
+The two failure classes leave the stream in different states, and recovery
+differs accordingly. After a structural failure the position of the next event
+is unknown, so the only recovery is resynchronization: scanning forward for a
+recognizable boundary and resuming there, discarding whatever lay between. A
+content failure carries no such consequence, because the bytes were read
+correctly and only their meaning was refused — the cursor's structural position
+remains exactly where the failing element ends. An implementation MAY therefore
+offer a consumer the option to skip just the offending element and continue from
+that intact position, without scanning. This is optional consumer-facing policy,
+not a requirement of this specification: a conforming implementation may instead
+simply report the content failure and stop.
 
 An implementation must expose a single, allocation-free test for each of the
-first two classes, and the handler's own error must remain reachable through the
-wrapper that marks its origin.
+first two classes, and the consumer's own error must remain reachable through the
+wrapper that marks its class.
 
 The structural test must be a **predicate that owns the class boundary at the
-handler**, not a mere membership check against a marker value:
+content wrapper**, not a mere membership check against a marker value:
 
-* A handler-originated failure is never classified as structural, **even when it
-  carries a structural error value**. A handler may return the implementation's
-  own structural error, or anything wrapping it; the origin wrapper decides the
-  class, and the inspection stops there.
+* A content-originated failure is never classified as structural, **even when it
+  carries a structural error value**. A consumer may pass on the implementation's
+  own structural error, or anything wrapping it; the wrapper decides the class, and
+  the inspection stops there.
 * Need-more-data is not a failure and is never classified as structural.
 * Every failure the cursor itself raises is classified as structural, however
   many layers a consumer has wrapped it in.
-* Marking the origin must not hide the handler's own error: it stays reachable
+* Marking the class must not hide the consumer's own error: it stays reachable
   for a consumer inspecting the cause. Reachability and classification are
   separate questions, and only the classification stops at the boundary.
 
 A marker value alone cannot satisfy this, because the idiomatic membership check
-walks the entire causal chain and therefore cannot stop at the handler.
+walks the entire causal chain and therefore cannot stop at the wrapper.
 
 In Go: `parser.IsStructural(err)` is the canonical test — true for every
-structural cursor failure, false for anything wrapped in `*parser.HandlerError`
+structural cursor failure, false for anything wrapped in `*parser.ContentError`
 whatever it carries, and false for `NeedMoreData`. The `parser.ErrStructural`
 sentinel remains so `errors.Is` keeps working on an error a cursor operation
 returned directly, but it is not the classification test.
-`errors.As(err, &handlerErr)` with a `*parser.HandlerError` identifies the
-handler-originated class, records which event failed, and unwraps to the
-handler's own error so `errors.Is`/`errors.As` reach its sentinels and types
-unchanged.
+`parser.NewContentError(id, offset, err)` marks the content class,
+`errors.As(err, &contentErr)` with a `*parser.ContentError` identifies it, and it
+unwraps to the consumer's own error so `errors.Is`/`errors.As` reach its sentinels
+and types unchanged.
 
 ## 7. Conformance
 

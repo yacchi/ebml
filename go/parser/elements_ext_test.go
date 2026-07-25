@@ -38,7 +38,7 @@ func callerClassifier(id parser.ElementID) parser.Kind {
 //
 // The classifier used to be supplied through an optional Option, backed by a
 // built-in default; both are gone. It is now a required positional argument of
-// New and NewScanner, so "forgot the classifier" is a compile error instead of a
+// New and NewCursor, so "forgot the classifier" is a compile error instead of a
 // stream silently read with the wrong structure -- which is why this file has no
 // negative test for the omitted case: it cannot be written.
 var _ parser.KindClassifier = callerClassifier
@@ -71,7 +71,7 @@ func TestNewRejectsNilClassifier(t *testing.T) {
 		call func()
 	}{
 		{"New", func() { parser.New(nil) }},
-		{"NewScanner", func() { parser.NewScanner(&parser.HandlerFuncs{}, nil) }},
+		{"NewCursor", func() { parser.NewCursor(nil) }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			defer func() {
