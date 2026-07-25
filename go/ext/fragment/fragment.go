@@ -44,6 +44,7 @@ package fragment
 import (
 	"time"
 
+	"github.com/yacchi/ebml/ext/tags"
 	"github.com/yacchi/ebml/ext/tree"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
@@ -148,21 +149,15 @@ func (f *Fragment) Value(id parser.ElementID) *tree.Element {
 	return nil
 }
 
-// Tag returns the TagString of the first SimpleTag whose TagName is name, and
-// whether such a tag was present. See Tags for how the pairs are collected.
+// Tag returns the last TagString of a Segment-scoped SimpleTag whose TagName is
+// name, and whether such a tag was present. RFC 9559 does not define precedence
+// for repeated names; last-wins is this library's choice. See Tags for how the
+// pairs are collected.
 func (f *Fragment) Tag(name string) (string, bool) {
 	if f == nil {
 		return "", false
 	}
-	if name == "" {
-		return "", false
-	}
-	for _, st := range f.Segment.Descendants(matroska.IDSimpleTag) {
-		if st.Find(matroska.IDTagName).AsString() == name {
-			return st.Find(matroska.IDTagString).AsString(), true
-		}
-	}
-	return "", false
+	return tags.ReadElement(f.Segment).Get(tags.Target{}, name)
 }
 
 // Tags flattens the Segment's SimpleTag elements into a TagName -> TagString map.
@@ -171,27 +166,17 @@ func (f *Fragment) Tag(name string) (string, bool) {
 //
 // Collection is generic and depth-agnostic: every SimpleTag under the Segment
 // counts, wherever it sits, including one nested inside another SimpleTag. A tag
-// with an empty TagName is skipped, and a repeated TagName keeps its first
-// occurrence, which is what Tag reports too. Interpreting a specific tag --
+// with an empty TagName is skipped, and a repeated TagName keeps its last
+// occurrence, which is what Tag reports too. Tags with non-zero Targets are
+// excluded because these accessors are Segment-scoped. Interpreting a specific tag --
 // naming conventions, value encoding -- is left to the caller, which is how AWS
 // KVS metadata (AWS_KINESISVIDEO_FRAGMENT_NUMBER and friends) is read without
 // this package knowing anything about it.
 func (f *Fragment) Tags() map[string]string {
-	out := make(map[string]string)
 	if f == nil {
-		return out
+		return make(map[string]string)
 	}
-	for _, st := range f.Segment.Descendants(matroska.IDSimpleTag) {
-		name := st.Find(matroska.IDTagName).AsString()
-		if name == "" {
-			continue
-		}
-		if _, seen := out[name]; seen {
-			continue
-		}
-		out[name] = st.Find(matroska.IDTagString).AsString()
-	}
-	return out
+	return tags.ReadElement(f.Segment).All(tags.Target{})
 }
 
 // Tracks returns the Segment's TrackEntry elements in stream order, and nil when

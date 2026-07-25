@@ -19,6 +19,9 @@ carries no meaning.
   retains only directly completed children and has no configuration or lexical
   chaining: neither EBML nor Matroska defines scope inheritance, so a consumer
   wanting two levels runs two Trackers and states its own precedence.
+* Where RFC 9559 is silent, the library states its choice in documentation
+  rather than leaving behavior implicit. Tag traversal and precedence rules
+  have exactly one implementation in `ext/tags`.
 * The reading core has exactly ONE surface: a streaming pull operation, `Cursor.Next`,
   returning a closed `Node` (`*MasterNode`/`*LeafNode`/`*EndNode`) one event at a
   time, not a document model. Never add a second push or callback event shape.
@@ -221,6 +224,10 @@ The core is working and tested:
   queries. Scopes have no lexical chaining or inheritance: neither EBML nor
   Matroska defines it, so a consumer wanting two levels runs two Trackers and
   states its own precedence.
+* `go/ext/tags` computes target-aware views over observed `Tags` elements.
+  Segment-default tags are cumulative and positionless, repeated names are
+  last-wins by library choice, and `ext/fragment.Fragment.Tag` and `Tags` are
+  re-expressed on it.
 * `go/kvs` is a separate module holding all KVS-specific tag and metadata
   knowledge; the core module has no KVS element or tag knowledge left. The
   runnable example moved to `go/kvs/examples/getmedia`.

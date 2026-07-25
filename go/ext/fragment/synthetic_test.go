@@ -317,6 +317,26 @@ func TestLateMetadataIsNotAttributedToAnEarlierFragment(t *testing.T) {
 	}
 }
 
+func TestFragmentTagIsLastWins(t *testing.T) {
+	raw := synFragment(
+		synTags("state", "first"),
+		synTags("state", "second"),
+		synCluster(0, synSimpleBlock(1, 0, []byte{0x01})),
+	)
+	frags := runWhole(t, raw)
+	if len(frags) != 1 {
+		t.Fatalf("got %d fragments, want 1", len(frags))
+	}
+	// RFC 9559 leaves repeated-name precedence undefined; this library chooses
+	// last-wins so later stream statements remain visible.
+	if got, ok := frags[0].Tag("state"); !ok || got != "second" {
+		t.Fatalf("Tag(state) = %q, %v; want second (library last-wins choice)", got, ok)
+	}
+	if got := frags[0].Tags()["state"]; got != "second" {
+		t.Fatalf("Tags()[state] = %q, want second to match Tag", got)
+	}
+}
+
 // TestStructuralErrorIsTerminalWithoutResync checks the default: a structural
 // error is reported, the fragments completed before it are still returned, and the
 // assembler does not silently carry on.

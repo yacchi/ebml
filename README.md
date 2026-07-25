@@ -326,6 +326,55 @@ for {
 }
 ```
 
+### `ext/tags`
+
+`tags.Read` computes a view of the `Tags` elements observed in a scope. A tag
+applies to the whole Segment by default; `Targets` narrows it by target type or
+UID. Multiple `Tags` elements are cumulative and positionless under RFC 9559, so
+tags after a Cluster remain readable. RFC 9559 does not define precedence for a
+repeated `TagName`; this library chooses last-wins, unlike `net/http.Header.Get`,
+which returns the first value.
+
+```go
+package main
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+
+	"github.com/yacchi/ebml/ext/scope"
+	"github.com/yacchi/ebml/ext/stream"
+	"github.com/yacchi/ebml/ext/tags"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
+)
+
+func main() {
+	src := stream.New(bytes.NewReader(nil), matroska.KindForElementID)
+	tracker := scope.NewTracker(matroska.IDSegment, src)
+	for {
+		node, err := src.Next()
+		if errors.Is(err, io.EOF) {
+			set := tags.Read(tracker.Finish())
+			value, _ := set.Get(tags.Target{}, "ContactId")
+			fmt.Println(value)
+			return
+		}
+		if err != nil {
+			panic(err)
+		}
+		if _, err := tracker.Observe(node); err != nil {
+			panic(err)
+		}
+		if master, ok := node.(*parser.MasterNode); ok {
+			master.Descend()
+		}
+	}
+}
+```
+
 ### `ext/tree`: two orthogonal access modes
 
 | Mode | Operations | Meaning |
