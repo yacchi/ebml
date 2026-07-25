@@ -150,6 +150,11 @@ An unknown-size master closes in one of two ways:
   before that element is processed at the enclosing depth.
 * End of input closes all remaining unknown-size masters during finalization.
 
+The boundary rule is evaluated against only the innermost open unknown-size
+master. Each pull closes exactly one level. The triggering element's header is
+not consumed until every level that must close has closed, so that element is
+reported once, at the depth that remains.
+
 Boundary detection must never scan payload bytes for the EBML header magic.
 Payload data may contain that byte sequence.
 

@@ -130,7 +130,9 @@ The core is working and tested:
   return `NeedMoreData` and be retried after `Feed`. Ancestry is the consumer's
   own loop state, not a per-event allocation. `parser.WithBoundary` closes
   unknown-size masters structurally when a consumer recognizes the next
-  top-level element ID.
+  top-level element ID. Nested unknown-size masters are covered by conformance
+  tests: boundary closure is innermost-first, one level per event, with the
+  triggering header re-peeked at the remaining depth.
 * VINT parsing recognizes unknown sizes, rejects element-ID VINTs over 4 bytes
   and size VINTs over 8 bytes with `VINTLengthError`, and reports
   `NeedMoreData`, `TruncatedError`, `ElementOverflowError`,
@@ -182,9 +184,17 @@ Writing and round-trip conformance are complete. The pull cursor, its lazy flow
 control, iterator caveat, and Go extensions are documented; remaining work is
 focused on broader reading conformance and Matroska coverage:
 
-1. Add conformance coverage for nested unknown-size masters and verify their
-   outward structural closure behavior.
+1. BLOCKER (`KVS-CONSUMER-FEEDBACK.md`, Round 2 F4/F5): `ext/fragment` never
+   closes an unknown-size `Cluster`, because `segmentBoundary` answers only
+   about `EBML`/`Segment` while the cursor asks about the INNERMOST open master
+   — which on real Amazon Connect data is the Cluster. The core mechanism is
+   correct and now covered (`go/parser/nested_unknown_size_test.go`); the gap is
+   in the extension, and `fragment.New` exposes no hook for a consumer to fix it
+   from outside. F5 is why no test caught it: the synthetic corpus models a
+   KNOWN-size Cluster, a topology the field does not produce. Fixing F4 without
+   also correcting the corpus would leave the same blind spot.
 2. Add CRC-32 validation; CRC-32 and Void are currently opaque skippable leaves.
+   Note it cannot live in `go/parser`, which holds no element knowledge.
 3. Broaden Matroska value and element coverage beyond the KVS fragment shape.
    The core remains terminal on structural corruption; recovery belongs to the
    opt-in `ext/fragment` paths — `WithResync` for structural failures,
