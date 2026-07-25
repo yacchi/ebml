@@ -1,8 +1,7 @@
-# topology_basic: ONE EBML header + ONE unknown-size Segment.
-# Segment { Info, Tracks, Tags(ContactId=A), Cluster(unknown-size, 3 SimpleBlocks) }.
-# Property: the Cluster closes at the first registered non-child element or EOF, while the Segment stays open.
-# This is the real KVS topology and exercises RFC 9559 deny-only Cluster closure.
-# bytes=703
+# known_size_cluster: the legal Matroska but not KVS shape retained for coverage.
+# Segment { Info, Tracks, Tags(ContactId=A), Cluster(known-size, 3 SimpleBlocks) }.
+# KVS sends unknown-size Clusters; this fixture preserves the old declared-end path.
+# bytes=696
 1a45dfa3934286810142f78101428288
 6d6174726f736b611853806701ffffff
 ffffffff1549a9669a73a49010111213
@@ -39,11 +38,11 @@ c0303030303030303030303030303030
 74616e636549644487a4303030303030
 30302d303030302d343030302d383030
 302d3030303030303030303061611f43
-b67501ffffffffffffffe78100a3a481
-0000000102030405060708090a0b0c0d
-0e0f101112131415161718191a1b1c1d
-1e1f20a3a481000a0002030405060708
-090a0b0c0d0e0f101112131415161718
-191a1b1c1d1e1f2021a3a48100140003
-0405060708090a0b0c0d0e0f10111213
-1415161718191a1b1c1d1e1f202122
+b675f5e78100a3a48100000001020304
+05060708090a0b0c0d0e0f1011121314
+15161718191a1b1c1d1e1f20a3a48100
+0a0002030405060708090a0b0c0d0e0f
+101112131415161718191a1b1c1d1e1f
+2021a3a481001400030405060708090a
+0b0c0d0e0f101112131415161718191a
+1b1c1d1e1f202122

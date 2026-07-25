@@ -205,7 +205,7 @@ func scanAll(t *testing.T, p *Parser, events *[]logEvent, step *int, needMoreCou
 // reports element extents too, so a caller driving the primitives never
 // reconstructs an offset from event order.
 func TestElementHeaderOffsetAndClosedMasterExtent(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 	p := New(testKindClassifier)
 	p.Feed(raw)
 

@@ -201,7 +201,7 @@ func driveCursor(t *testing.T, raw []byte, chunk int, decide func(t *testing.T, 
 // committed fixture and, feeding the same bytes in 1-, 7- and 4096-byte chunks,
 // that it does not depend on how the stream was chunked.
 func TestCursorEventSequenceIsSplitInvariant(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 	want := cursorWantLines(cursorTopologyBasicEvents)
 
 	for _, chunk := range []int{1, 7, 4096} {
@@ -318,7 +318,7 @@ func snapshotEnd(n *EndNode) endSnapshot {
 // itself reports an unknown extent on its header and a concrete one only when
 // Finalize closes it.
 func TestCursorKnownSizeEndBeforeUnknownSizeParentCloses(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 	c := NewCursor(testKindClassifier)
 	c.Feed(raw)
 
@@ -402,7 +402,7 @@ func TestCursorKnownSizeEndBeforeUnknownSizeParentCloses(t *testing.T) {
 // scan: a skipped master reports no descendant and no end of its own, and nothing
 // else moves.
 func TestCursorSkipSubtreeLeavesFollowingEventsUntouched(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 
 	// The expectation is the full sequence minus the skipped subtree: its master
 	// header stays, its descendants and its own end go.
@@ -448,7 +448,7 @@ func TestCursorSkipSubtreeLeavesFollowingEventsUntouched(t *testing.T) {
 // TestCursorScanIsAllocationFree, which scans this fixture without a single
 // allocation per event.
 func TestCursorPayloadIsPayForWhatYouUse(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 	want := cursorWantLines(cursorTopologyBasicEvents)
 
 	for _, chunk := range []int{1, 7, 4096} {
@@ -498,7 +498,7 @@ func TestCursorPayloadIsPayForWhatYouUse(t *testing.T) {
 // header, so Payload may report NeedMoreData, and the node stays valid across Feed
 // until the bytes are there.
 func TestCursorPayloadSurvivesNeedMoreDataRetry(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 	c := NewCursor(testKindClassifier)
 	pos := 0
 	feed := func() bool {
@@ -591,8 +591,8 @@ func TestCursorBoundaryClosesUnknownSizeMaster(t *testing.T) {
 		t.Run(fmt.Sprintf("chunk_%d", chunk), func(t *testing.T) {
 			var asked []ElementID
 			boundary := WithBoundary(func(open, next ElementID) bool {
-				if open != curIDSegment {
-					t.Fatalf("boundary asked about %s, want only the unknown-size Segment", open)
+				if open != curIDSegment && open != curIDCluster {
+					t.Fatalf("boundary asked about %s, want Segment or Cluster", open)
 				}
 				asked = append(asked, next)
 				return next == curIDEBMLHeader || next == curIDSegment
@@ -623,7 +623,7 @@ func TestCursorBoundaryClosesUnknownSizeMaster(t *testing.T) {
 // events are reported first, and the masters close when Next reaches the end of the
 // bytes.
 func TestCursorFinalizeBeforeDrainingKeepsEvents(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 	c := NewCursor(testKindClassifier)
 	c.Feed(raw)
 	if err := c.Finalize(); err != nil {
@@ -683,10 +683,10 @@ func TestCursorFinalizeReportsTruncation(t *testing.T) {
 // The goldens are recorded from the low-level Parser, so this is what keeps the two
 // layers from drifting apart.
 func TestCursorHeadersMatchCommittedGolden(t *testing.T) {
-	got, _ := driveCursor(t, loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex"), 4096, nil)
+	got, _ := driveCursor(t, loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex"), 4096, nil)
 
 	var want []logEvent
-	for _, line := range strings.Split(string(loadGolden(t, "golden/kvs/topology_basic.jsonl")), "\n") {
+	for _, line := range strings.Split(string(loadGolden(t, "golden/kvs/known_size_cluster.jsonl")), "\n") {
 		var ev logEvent
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			t.Fatalf("decode golden line %q: %v", line, err)
@@ -1093,7 +1093,7 @@ func iterateCursor(t *testing.T, raw []byte, breakAt int) []string {
 // of a range-over-func loop must therefore leave the cursor exactly where it
 // stopped -- including the decision left on the node the loop broke on.
 func TestCursorNodesIteratorResumesAtEveryEvent(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 
 	full := iterateCursor(t, raw, -1)
 	assertCursorLines(t, full, cursorWantLines(cursorTopologyBasicEvents))

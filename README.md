@@ -413,13 +413,16 @@ commented fixture format.
 
 ## Fixture corpus
 
-The synthetic KVS corpus covers `topology_basic`, `tail_last_fragment`,
+The synthetic KVS corpus covers 15 fixtures, with unknown-size Clusters matching
+the field shape: `topology_basic`, `tail_last_fragment`,
 `false_ebml_magic_in_pcm`, `multi_cluster`, `multi_segment`, `tagless_single`,
 `tagless_consecutive`, `filter_mismatch`, `gap`, `scaled_timestamps`,
 `unknown_elements`, `partial_tags` (a fragment with a populated but partial
 `Tags` element missing its identity keys), and `two_tracks` (one `Cluster`
-carrying `SimpleBlock`s for two named audio tracks). It is exercised across
-every split pattern. Fixtures never contain real capture data.
+carrying `SimpleBlock`s for two named audio tracks), `known_size_cluster` (legal
+Matroska but not KVS), and `connect_real_shape` (two Tags elements before and
+two after the Cluster). It is exercised across every split pattern. Fixtures
+never contain real capture data.
 
 ## Build and test
 

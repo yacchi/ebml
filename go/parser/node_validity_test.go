@@ -101,7 +101,7 @@ func freshCursor(t *testing.T, raw []byte) *Cursor {
 // exported method the node types report, and this states which methods those are, so
 // adding one to a variant cannot slip past the freshness contract unnoticed.
 func TestNodeMethodSetIsCovered(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 	for _, v := range nodeVariants {
 		t.Run(v.name, func(t *testing.T) {
 			handle := v.next(t, freshCursor(t, raw))
@@ -124,7 +124,7 @@ func TestNodeMethodSetIsCovered(t *testing.T) {
 // CURRENT event is of the very same variant as the stale handle, so answering it
 // would report the later element's ID, offset and size without a word.
 func TestStaleNodeRejectsEveryMethod(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 
 	cases := []struct {
 		name    string
@@ -248,7 +248,7 @@ func wantStalePanic(t *testing.T, what string, f func()) {
 // a COPY taken in the same generation -- the copy carries that generation, so it is
 // as valid as the node it came from until the next Next.
 func TestFreshNodeAcceptsEveryMethod(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 
 	for _, v := range nodeVariants {
 		t.Run(v.name, func(t *testing.T) {
@@ -298,7 +298,7 @@ func copyOf(t *testing.T, n Node) Node {
 // carve-out would have to come back into Node's doc, README.md and spec/SPEC.md
 // section 3 with it.
 func TestNodeIsAllocatedPerEvent(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 
 	for _, v := range nodeVariants {
 		t.Run(v.name, func(t *testing.T) {
@@ -348,7 +348,7 @@ func TestNodeIsAllocatedPerEvent(t *testing.T) {
 // Finalize must, since it closes masters and so leaves any node already handed out
 // behind.
 func TestGenerationAdvancesOnNextAndFinalizeNotFeed(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 
 	c := NewCursor(testKindClassifier)
 	if got := c.gen; got != 0 {
@@ -454,7 +454,7 @@ func TestGenerationAdvancesOnNextAndFinalizeNotFeed(t *testing.T) {
 // bytes cannot reach the cursor's state: what the node reports, where the cursor
 // stands, and the whole rest of the scan are unchanged.
 func TestPayloadViewCannotAlterCursorState(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 	want := cursorWantLines(cursorTopologyBasicEvents)
 
 	c := NewCursor(testKindClassifier)
@@ -555,7 +555,7 @@ func warmCursor(t *testing.T, raw []byte) *Cursor {
 // allocates exactly what a scan that materialises none does -- the node, and nothing
 // else. It is why a consumer may look at bulk PCM without paying for a copy of it.
 func TestPayloadDeliveryAddsNoAllocation(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 
 	measure := func(readPayload bool) (float64, int) {
 		c := warmCursor(t, raw)
@@ -593,7 +593,7 @@ func TestPayloadDeliveryAddsNoAllocation(t *testing.T) {
 // one integer comparison against the cursor's generation, so reading every extent
 // accessor of an event adds nothing to the one node the event allocated.
 func TestNodeAccessorsAddNoAllocation(t *testing.T) {
-	raw := loadHexFixture(t, "fixtures/kvs/topology_basic.ebml.hex")
+	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 	c := warmCursor(t, raw)
 
 	var sink int64

@@ -90,7 +90,7 @@ func TestParseMatchesFixtureFacts(t *testing.T) {
 // stream declared: a known-size Cluster ends where its size says, and an
 // unknown-size Segment reports no end at all.
 func TestParseSizesAndExtents(t *testing.T) {
-	f := fixture(t, "topology_basic")
+	f := fixture(t, "known_size_cluster")
 	roots, err := tree.Parse(f.Data)
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)

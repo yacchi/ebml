@@ -18,11 +18,11 @@
 //	  Tracks     { TrackEntry { TrackNumber, TrackType, CodecID, Name } x2 }
 //	  Tags?      { Tag { Targets, SimpleTag* (ProducerTimestamp, FragmentNumber,
 //	                     ContinuationToken, ContactId?, InstanceId) } }
-//	  Cluster (KNOWN-size) { Timestamp, SimpleBlock+ }
+//	  Cluster (UNKNOWN-size) { Timestamp, SimpleBlock+ }
 //
-// The Cluster is known-size (closes via end_master the moment its bytes are
-// consumed) while the Segment is unknown-size (closed only by the next top-level
-// element or by EOF) — the tail-fix property the KVS reader needs.
+// Real KVS Clusters are unknown-size. Their closure comes from the RFC 9559
+// deny-only child rule: the first registered element that cannot be a Cluster
+// child closes the Cluster, while the enclosing Segment remains unknown-size.
 package kvsgen
 
 import (
@@ -200,6 +200,21 @@ func (s *stream) tracks(audioParams bool) {
 	})
 }
 
+type tagPair struct {
+	name, value string
+}
+
+func (s *stream) tagsWithPairs(pairs ...tagPair) {
+	s.master(matroska.IDTags, func() {
+		s.master(matroska.IDTag, func() {
+			s.master(matroska.IDTargets, nil)
+			for _, pair := range pairs {
+				s.simpleTag(pair.name, pair.value)
+			}
+		})
+	})
+}
+
 // tags writes a Tags element. If contactID is "" the ContactId SimpleTag is omitted
 // (tagless-by-contact fragment). omitIdentity omits both identity tags while
 // retaining the ordinary fragment metadata.
@@ -208,20 +223,18 @@ func (s *stream) tags(producerTS, fragmentNumber, contactID string) {
 }
 
 func (s *stream) tagsWithIdentity(producerTS, fragmentNumber, contactID string, omitIdentity bool) {
-	s.master(matroska.IDTags, func() {
-		s.master(matroska.IDTag, func() {
-			s.master(matroska.IDTargets, nil) // empty Targets master
-			s.simpleTag("AWS_KINESISVIDEO_PRODUCER_TIMESTAMP", producerTS)
-			s.simpleTag("AWS_KINESISVIDEO_FRAGMENT_NUMBER", fragmentNumber)
-			s.simpleTag("AWS_KINESISVIDEO_CONTINUATION_TOKEN", fakeContinuation)
-			if !omitIdentity {
-				if contactID != "" {
-					s.simpleTag("ContactId", contactID)
-				}
-				s.simpleTag("InstanceId", fakeInstance)
-			}
-		})
-	})
+	pairs := []tagPair{
+		{"AWS_KINESISVIDEO_PRODUCER_TIMESTAMP", producerTS},
+		{"AWS_KINESISVIDEO_FRAGMENT_NUMBER", fragmentNumber},
+		{"AWS_KINESISVIDEO_CONTINUATION_TOKEN", fakeContinuation},
+	}
+	if !omitIdentity {
+		if contactID != "" {
+			pairs = append(pairs, tagPair{"ContactId", contactID})
+		}
+		pairs = append(pairs, tagPair{"InstanceId", fakeInstance})
+	}
+	s.tagsWithPairs(pairs...)
 }
 
 // block is one synthetic SimpleBlock: a relative timecode, which may be negative,
@@ -256,6 +269,15 @@ func (s *stream) cluster(clusterTS uint64, blocks ...block) {
 	})
 }
 
+func (s *stream) unknownCluster(clusterTS uint64, blocks ...block) {
+	s.unknownMaster(matroska.IDCluster, func() {
+		s.uint(matroska.IDTimestamp, clusterTS)
+		for _, b := range blocks {
+			s.simpleBlock(b)
+		}
+	})
+}
+
 func (s *stream) twoTrackCluster(clusterTS uint64, blocks ...struct {
 	track uint64
 	block
@@ -268,7 +290,26 @@ func (s *stream) twoTrackCluster(clusterTS uint64, blocks ...struct {
 	})
 }
 
+func (s *stream) unknownTwoTrackCluster(clusterTS uint64, blocks ...struct {
+	track uint64
+	block
+}) {
+	s.unknownMaster(matroska.IDCluster, func() {
+		s.uint(matroska.IDTimestamp, clusterTS)
+		for _, b := range blocks {
+			s.simpleBlockOnTrack(b.track, b.block)
+		}
+	})
+}
+
 // ---- Fragment builder ----
+
+type clusterSizeStrategy uint8
+
+const (
+	unknownClusterSize clusterSizeStrategy = iota
+	knownClusterSize
+)
 
 type fragOpts struct {
 	producerTS     string
@@ -282,6 +323,7 @@ type fragOpts struct {
 	omitIdentity   bool
 	clusterTS      uint64
 	blocks         []block
+	clusterSize    clusterSizeStrategy
 }
 
 // fragment writes one EBML-header + unknown-size Segment fragment.
@@ -299,6 +341,10 @@ func (s *stream) fragment(o fragOpts) {
 		if !o.omitTags {
 			s.tagsWithIdentity(o.producerTS, o.fragmentNumber, o.contactID, o.omitIdentity)
 		}
-		s.cluster(o.clusterTS, o.blocks...)
+		if o.clusterSize == knownClusterSize {
+			s.cluster(o.clusterTS, o.blocks...)
+		} else {
+			s.unknownCluster(o.clusterTS, o.blocks...)
+		}
 	})
 }

@@ -384,20 +384,20 @@ func TestTopologyBasic(t *testing.T) {
 	}
 }
 
-// TestTailLastFragment asserts the tail-fix property: the final fragment's
-// Cluster is delivered during a Feed call, strictly before Finalize is invoked.
+// TestTailLastFragment asserts that an unknown-size final Cluster is delivered
+// when EOF closes it, while the preceding Cluster still closes during Feed.
 func TestTailLastFragment(t *testing.T) {
 	raw := loadHex(t, "tail_last_fragment")
 	res := run(t, splitOneByte(raw))
 
-	if len(res.fromFinalize) != 0 {
-		t.Fatalf("expected no fragments from Finalize (tail must emit before EOF), got %d", len(res.fromFinalize))
+	if len(res.fromFinalize) != 1 {
+		t.Fatalf("expected one fragment from Finalize, got %d", len(res.fromFinalize))
 	}
-	if len(res.fromFeed) != 2 {
-		t.Fatalf("want 2 fragments from Feed, got %d", len(res.fromFeed))
+	if len(res.fromFeed) != 1 {
+		t.Fatalf("want 1 fragment from Feed, got %d", len(res.fromFeed))
 	}
-	// Second fragment is the tail: 2 SimpleBlocks, ClusterTimestamp 1024.
-	tail := res.fromFeed[1]
+	// Finalized fragment is the tail: 2 SimpleBlocks, ClusterTimestamp 1024.
+	tail := res.fromFinalize[0]
 	if got := tail.ClusterTimestamp(); got != 1024 {
 		t.Fatalf("tail ClusterTimestamp = %d", got)
 	}
@@ -584,15 +584,15 @@ func TestFilterMismatch(t *testing.T) {
 	}
 }
 
-// TestMultiCluster asserts two Clusters in one Segment yield two Fragments that
-// SHARE the Segment tree, both delivered before EOF, with distinct Clusters.
+// TestMultiCluster asserts two unknown-size Clusters in one Segment yield two
+// Fragments that share the Segment tree, with the trailing one delivered at EOF.
 func TestMultiCluster(t *testing.T) {
 	raw := loadHex(t, "multi_cluster")
 	res := run(t, splitRandom(raw, 12345, 7))
-	if len(res.fromFinalize) != 0 {
-		t.Fatalf("both Clusters must emit before EOF, got %d from Finalize", len(res.fromFinalize))
+	if len(res.fromFinalize) != 1 {
+		t.Fatalf("one trailing Cluster must emit from Finalize, got %d", len(res.fromFinalize))
 	}
-	frags := res.fromFeed
+	frags := res.all()
 	if len(frags) != 2 {
 		t.Fatalf("want 2 fragments, got %d", len(frags))
 	}

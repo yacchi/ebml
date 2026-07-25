@@ -1,6 +1,7 @@
 package fragment_test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/yacchi/ebml/ext/fragment"
@@ -98,17 +99,78 @@ func TestGlobalElementDoesNotEndACluster(t *testing.T) {
 }
 
 func TestKnownSizeClusterStillEmitsAtItsDeclaredEnd(t *testing.T) {
-	raw := unknownClusterDocument(
-		synCluster(0, synSimpleBlock(1, 0, []byte{1}), synSimpleBlock(1, 1, []byte{2})),
-		synTags("next", "document"),
-	)
+	raw := loadHex(t, "known_size_cluster")
 	a := fragment.New()
 	frags, err := a.Feed(raw)
 	if err != nil {
 		t.Fatalf("Feed: %v", err)
 	}
-	if len(frags) != 1 || len(frags[0].Blocks) != 2 {
-		t.Fatalf("got %d fragments and %d blocks, want 1 and 2", len(frags), len(frags[0].Blocks))
+	if len(frags) != 1 || len(frags[0].Blocks) != 3 {
+		t.Fatalf("got %d fragments and %d blocks, want 1 and 3", len(frags), len(frags[0].Blocks))
+	}
+}
+
+func TestConnectRealShapeUnknownClusterEmitsWithoutFinalize(t *testing.T) {
+	raw := loadHex(t, "connect_real_shape")
+	a := fragment.New()
+	frags, err := a.Feed(raw)
+	if err != nil {
+		t.Fatalf("Feed: %v", err)
+	}
+	if len(frags) != 1 {
+		t.Fatalf("Feed returned %d fragments, want 1", len(frags))
+	}
+	if len(frags[0].Blocks) != 4 {
+		t.Fatalf("Blocks = %d, want 4", len(frags[0].Blocks))
+	}
+	seen := map[uint64]bool{}
+	for _, b := range frags[0].Blocks {
+		seen[b.TrackNumber] = true
+	}
+	if !seen[1] || !seen[2] {
+		t.Fatalf("track numbers = %v, want both 1 and 2", seen)
+	}
+}
+
+// Q3 in KVS-CONSUMER-FEEDBACK.md is an open design question, not an endorsed
+// limitation: post-Cluster metadata is outside the emitted Fragment's scope.
+func TestPostClusterTagsAreNotInTheEmittedFragment(t *testing.T) {
+	raw := loadHex(t, "connect_real_shape")
+	tagsID := []byte{0x12, 0x54, 0xc3, 0x67}
+	offset := 0
+	for i := 0; i < 4; i++ {
+		next := bytes.Index(raw[offset:], tagsID)
+		if next < 0 {
+			t.Fatal("fixture does not contain the expected pre-Cluster Tags elements")
+		}
+		offset += next + len(tagsID)
+	}
+	frags, err := fragment.New().Feed(raw[:offset+1])
+	if err != nil {
+		t.Fatalf("Feed: %v", err)
+	}
+	tags := frags[0].Tags()
+	for _, name := range []string{
+		"ContactId",
+		"InstanceId",
+		"MimeType",
+		"AUDIO_TO_CUSTOMER",
+		"AUDIO_FROM_CUSTOMER",
+		"AWS_KINESISVIDEO_FRAGMENT_NUMBER",
+		"AWS_KINESISVIDEO_SERVER_TIMESTAMP",
+		"AWS_KINESISVIDEO_PRODUCER_TIMESTAMP",
+	} {
+		if _, ok := tags[name]; !ok {
+			t.Errorf("Tags() missing pre-Cluster key %q", name)
+		}
+	}
+	for _, name := range []string{
+		"AWS_KINESISVIDEO_MILLIS_BEHIND_NOW",
+		"AWS_KINESISVIDEO_CONTINUATION_TOKEN",
+	} {
+		if _, ok := tags[name]; ok {
+			t.Errorf("Tags() contains post-Cluster key %q", name)
+		}
 	}
 }
 

@@ -57,6 +57,38 @@ func TestReaderSplitInvariant(t *testing.T) {
 	}
 }
 
+// Q3 in KVS-CONSUMER-FEEDBACK.md is an open design question: the consumer API
+// currently sees only metadata that preceded the emitted unknown-size Cluster.
+func TestReaderConnectRealShapeMetadataScope(t *testing.T) {
+	raw := fixture(t, "connect_real_shape")
+	tagsID := []byte{0x12, 0x54, 0xc3, 0x67}
+	offset := 0
+	for i := 0; i < 4; i++ {
+		next := bytes.Index(raw[offset:], tagsID)
+		if next < 0 {
+			t.Fatal("fixture does not contain the expected post-Cluster Tags element")
+		}
+		offset += next + len(tagsID)
+	}
+	r := NewReader(bytes.NewReader(raw), WithBufferSize(offset+1))
+	_, m, err := r.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.FragmentNumber != "connect-real-0" {
+		t.Fatalf("FragmentNumber = %q, want connect-real-0", m.FragmentNumber)
+	}
+	if m.ProducerTimestamp.IsZero() || m.ServerTimestamp.IsZero() {
+		t.Fatalf("timestamps = producer %v, server %v; want both populated", m.ProducerTimestamp, m.ServerTimestamp)
+	}
+	if m.ContinuationToken != "" {
+		t.Fatalf("ContinuationToken = %q, want empty", m.ContinuationToken)
+	}
+	if m.MillisBehindNow != 0 {
+		t.Fatalf("MillisBehindNow = %v, want zero", m.MillisBehindNow)
+	}
+}
+
 func readNumbers(r *Reader) []string {
 	var out []string
 	for {

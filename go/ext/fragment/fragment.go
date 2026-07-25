@@ -10,12 +10,10 @@
 // # Early emission
 //
 // The defining property, inherited from the cursor, is early emission: a Fragment
-// is produced the moment its known-size Cluster is fully consumed, without
-// waiting for the enclosing unknown-size Segment to close, for the next Segment's
-// header to arrive, or for connection EOF. That removes both the boundary-wait
-// and the end-of-stream tail latency a whole-document parser incurs on a live
-// stream. Segment boundaries are found structurally -- the enclosing unknown-size
-// Segment is closed when the next top-level element's header appears -- never by
+// is produced when its Cluster closes, including an unknown-size Cluster when the
+// first registered non-child element appears, without waiting for the enclosing
+// unknown-size Segment to close, for the next Segment's header to arrive, or for
+// connection EOF. Segment and Cluster boundaries are found structurally, never by
 // scanning the bytes for the EBML magic, which can occur inside PCM.
 //
 // # What a Fragment retains

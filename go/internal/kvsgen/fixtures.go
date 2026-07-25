@@ -48,12 +48,14 @@ func BuildAll() []Fixture {
 		tailLastFragment(),
 		scaledTimestamps(),
 		unknownElements(),
+		knownSizeCluster(),
+		connectRealShape(),
 	}
 }
 
 // scaledTimestamps is the fixture that makes timestamp scaling observable: its
 // Info declares a TimestampScale of 100_000 ns instead of the 1_000_000 default,
-// and its single known-size Cluster carries a non-zero Timestamp plus a
+// and its single unknown-size Cluster carries a non-zero Timestamp plus a
 // SimpleBlock whose relative timecode is NEGATIVE, which is legal and places that
 // block before its Cluster's timestamp. A consumer that forgets the scale, or
 // that reads the relative timecode as unsigned, cannot reproduce these times.
@@ -65,7 +67,7 @@ func scaledTimestamps() Fixture {
 		s.info(segmentUID(0xA0), scale)
 		s.tracks(false)
 		s.tags("8000000000.000", "scaled-0", fakeContactA)
-		s.cluster(1000,
+		s.unknownCluster(1000,
 			block{-20, pcm(24, 0x11)},
 			block{0, pcm(24, 0x12)},
 			block{20, pcm(24, 0x13)},
@@ -91,7 +93,7 @@ func scaledTimestamps() Fixture {
 			SimpleBlocks:       3,
 			EBMLHeaders:        1,
 			UnknownSizeSegment: true,
-			KnownSizeCluster:   true,
+			KnownSizeCluster:   false,
 			ContactIDs:         []string{fakeContactA},
 			ProducerTimestamps: []string{"8000000000.000"},
 			FragmentNumbers:    []string{"scaled-0"},
@@ -121,7 +123,7 @@ func unknownElements() Fixture {
 		})
 		s.tracks(false)
 		s.tags("9000000000.000", "unknown-0", fakeContactA)
-		s.cluster(0, block{0, pcm(24, 0x21)})
+		s.unknownCluster(0, block{0, pcm(24, 0x21)})
 	})
 	data := s.bytes()
 	return Fixture{
@@ -144,7 +146,7 @@ func unknownElements() Fixture {
 			SimpleBlocks:       1,
 			EBMLHeaders:        1,
 			UnknownSizeSegment: true,
-			KnownSizeCluster:   true,
+			KnownSizeCluster:   false,
 			ContactIDs:         []string{fakeContactA},
 			ProducerTimestamps: []string{"9000000000.000"},
 			FragmentNumbers:    []string{"unknown-0"},
@@ -160,11 +162,11 @@ func multiCluster() Fixture {
 		s.info(segmentUID(0x20), defaultTimestampScale)
 		s.tracks(false)
 		s.tags("1500000000.000", "multi-cluster", fakeContactA)
-		s.cluster(0,
+		s.unknownCluster(0,
 			block{0, pcm(24, 0x61)},
 			block{10, pcm(24, 0x62)},
 		)
-		s.cluster(1024,
+		s.unknownCluster(1024,
 			block{0, pcm(24, 0x71)},
 			block{10, pcm(24, 0x72)},
 		)
@@ -174,29 +176,43 @@ func multiCluster() Fixture {
 		Name: "multi_cluster",
 		Comment: joinLines(
 			"multi_cluster: ONE EBML header + ONE unknown-size Segment containing",
-			"Info, Tracks, Tags, and TWO known-size Clusters. Each Cluster has a Timestamp",
+			"Info, Tracks, Tags, and TWO unknown-size Clusters. Each Cluster has a Timestamp",
 			"and two SimpleBlocks. Both Cluster end_master events occur before the",
 			"Segment is closed by FinalizeEOF.",
 		),
 		Data: data,
 		Facts: Facts{
-			Description:        "One unknown-size Segment containing two known-size Clusters.",
+			Description:        "One unknown-size Segment containing two unknown-size Clusters.",
 			Fragments:          1,
 			Segments:           1,
 			Clusters:           2,
 			SimpleBlocks:       4,
 			EBMLHeaders:        1,
 			UnknownSizeSegment: true,
-			KnownSizeCluster:   true,
+			KnownSizeCluster:   false,
 			ContactIDs:         []string{fakeContactA},
 			ProducerTimestamps: []string{"1500000000.000"},
 			FragmentNumbers:    []string{"multi-cluster"},
-			Notes:              "Both Clusters close structurally before the Segment closes at EOF.",
+			Notes:              "Both Clusters close by the deny-only child rule before the Segment closes at EOF.",
 		},
 	}
 }
 
 func topologyBasic() Fixture {
+	return topologyBasicWithStrategy("topology_basic", unknownClusterSize, "topology_basic: ONE EBML header + ONE unknown-size Segment.",
+		"Segment { Info, Tracks, Tags(ContactId=A), Cluster(unknown-size, 3 SimpleBlocks) }.",
+		"Property: the Cluster closes at the first registered non-child element or EOF, while the Segment stays open.",
+		"This is the real KVS topology and exercises RFC 9559 deny-only Cluster closure.")
+}
+
+func knownSizeCluster() Fixture {
+	return topologyBasicWithStrategy("known_size_cluster", knownClusterSize,
+		"known_size_cluster: the legal Matroska but not KVS shape retained for coverage.",
+		"Segment { Info, Tracks, Tags(ContactId=A), Cluster(known-size, 3 SimpleBlocks) }.",
+		"KVS sends unknown-size Clusters; this fixture preserves the old declared-end path.")
+}
+
+func topologyBasicWithStrategy(name string, strategy clusterSizeStrategy, comment ...string) Fixture {
 	s := newStream()
 	s.fragment(fragOpts{
 		producerTS:     "1000000000.000",
@@ -211,32 +227,26 @@ func topologyBasic() Fixture {
 			{10, pcm(32, 0x02)},
 			{20, pcm(32, 0x03)},
 		},
+		clusterSize: strategy,
 	})
 	data := s.bytes()
 	return Fixture{
-		Name: "topology_basic",
-		Comment: joinLines(
-			"topology_basic: ONE EBML header + ONE unknown-size Segment.",
-			"Segment { Info, Tracks, Tags(ContactId=A), Cluster(known-size, 3 SimpleBlocks) }.",
-			"Property: the Cluster end_master fires (peek) as soon as its known size is",
-			"consumed, while the Segment stays open and is closed only by FinalizeEOF.",
-			"This is the tail-fix property (last fragment need not wait for connection EOF",
-			"to observe the Cluster).",
-		),
-		Data: data,
+		Name:    name,
+		Comment: joinLines(comment...),
+		Data:    data,
 		Facts: Facts{
-			Description:        "Single fragment: unknown-size Segment holding a known-size Cluster.",
+			Description:        "Single fragment: unknown-size Segment holding a Cluster.",
 			Fragments:          1,
 			Segments:           1,
 			Clusters:           1,
 			SimpleBlocks:       3,
 			EBMLHeaders:        1,
 			UnknownSizeSegment: true,
-			KnownSizeCluster:   true,
+			KnownSizeCluster:   strategy == knownClusterSize,
 			ContactIDs:         []string{fakeContactA},
 			ProducerTimestamps: []string{"1000000000.000"},
 			FragmentNumbers:    []string{"91343852333181000000000000000000000000000000001"},
-			Notes:              "Cluster closes via end_master; Segment closes only at EOF.",
+			Notes:              "Cluster and Segment closure follow their declared size strategies.",
 		},
 	}
 }
@@ -248,7 +258,7 @@ func twoTracks() Fixture {
 		s.info(segmentUID(0x18), defaultTimestampScale)
 		s.tracks(true)
 		s.tags("1100000000.000", "two-track-0", fakeContactA)
-		s.twoTrackCluster(0,
+		s.unknownTwoTrackCluster(0,
 			struct {
 				track uint64
 				block
@@ -268,7 +278,7 @@ func twoTracks() Fixture {
 		Name: "two_tracks",
 		Comment: joinLines(
 			"two_tracks: ONE fragment with both named audio tracks carrying blocks in the",
-			"SAME known-size Cluster. Track 1 has 40 PCM bytes total and Track 2 has 32",
+			"SAME unknown-size Cluster. Track 1 has 40 PCM bytes total and Track 2 has 32",
 			"PCM bytes in one block; the unequal lengths exercise per-track selection.",
 		),
 		Data: data,
@@ -280,7 +290,7 @@ func twoTracks() Fixture {
 			SimpleBlocks:       3,
 			EBMLHeaders:        1,
 			UnknownSizeSegment: true,
-			KnownSizeCluster:   true,
+			KnownSizeCluster:   false,
 			ContactIDs:         []string{fakeContactA},
 			ProducerTimestamps: []string{"1100000000.000"},
 			FragmentNumbers:    []string{"two-track-0"},
@@ -325,7 +335,7 @@ func multiSegment() Fixture {
 			SimpleBlocks:       8,
 			EBMLHeaders:        4,
 			UnknownSizeSegment: true,
-			KnownSizeCluster:   true,
+			KnownSizeCluster:   false,
 			ContactIDs:         []string{fakeContactA},
 			ProducerTimestamps: tss,
 			FragmentNumbers:    fns,
@@ -368,7 +378,7 @@ func taglessSingle() Fixture {
 			SimpleBlocks:       3,
 			EBMLHeaders:        3,
 			UnknownSizeSegment: true,
-			KnownSizeCluster:   true,
+			KnownSizeCluster:   false,
 			ContactIDs:         []string{fakeContactA, "", fakeContactA},
 			ProducerTimestamps: []string{"2000000000.000", "2000000001.024", "2000000002.048"},
 			FragmentNumbers:    []string{"tag-0", "tag-1", "tag-2"},
@@ -414,7 +424,7 @@ func taglessConsecutive() Fixture {
 			SimpleBlocks:       4,
 			EBMLHeaders:        4,
 			UnknownSizeSegment: true,
-			KnownSizeCluster:   true,
+			KnownSizeCluster:   false,
 			ContactIDs:         []string{fakeContactA, "", "", fakeContactA},
 			ProducerTimestamps: []string{"3000000000.000", "3000000001.024", "3000000002.048", "3000000003.072"},
 			FragmentNumbers:    []string{"c-0", "c-1", "c-2", "c-3"},
@@ -454,7 +464,7 @@ func partialTags() Fixture {
 			SimpleBlocks:       2,
 			EBMLHeaders:        2,
 			UnknownSizeSegment: true,
-			KnownSizeCluster:   true,
+			KnownSizeCluster:   false,
 			ContactIDs:         []string{fakeContactA, ""},
 			ProducerTimestamps: []string{"3200000000.000", "3200000001.024"},
 			FragmentNumbers:    []string{"partial-0", "partial-1"},
@@ -493,7 +503,7 @@ func filterMismatch() Fixture {
 			SimpleBlocks:       4,
 			EBMLHeaders:        4,
 			UnknownSizeSegment: true,
-			KnownSizeCluster:   true,
+			KnownSizeCluster:   false,
 			ContactIDs:         ids,
 			ProducerTimestamps: tss,
 			FragmentNumbers:    []string{"fm-0", "fm-1", "fm-2", "fm-3"},
@@ -538,7 +548,7 @@ func gap() Fixture {
 			SimpleBlocks:       3,
 			EBMLHeaders:        3,
 			UnknownSizeSegment: true,
-			KnownSizeCluster:   true,
+			KnownSizeCluster:   false,
 			ContactIDs:         []string{fakeContactA},
 			ProducerTimestamps: []string{"5000000000.000", "5000000001.024", "5000000004.096"},
 			FragmentNumbers:    []string{"gap-0", "gap-1", "gap-4"},
@@ -580,7 +590,7 @@ func falseEBMLMagicInPCM() Fixture {
 			SimpleBlocks:       3,
 			EBMLHeaders:        1,
 			UnknownSizeSegment: true,
-			KnownSizeCluster:   true,
+			KnownSizeCluster:   false,
 			ContactIDs:         []string{fakeContactA},
 			ProducerTimestamps: []string{"6000000000.000"},
 			FragmentNumbers:    []string{"magic-0"},
@@ -609,9 +619,9 @@ func tailLastFragment() Fixture {
 		Name: "tail_last_fragment",
 		Comment: joinLines(
 			"tail_last_fragment: 2 fragments; the final Segment has NO following Segment.",
-			"Its known-size Cluster completes and is observable via end_master BEFORE any",
-			"EOF; the unknown-size Segment is closed only by FinalizeEOF. Proves the last",
-			"fragment's audio emits without waiting for the connection EOF (no ~4.3s tail).",
+			"Its unknown-size Cluster completes at EOF in this terminal single-document stream;",
+			"the Segment is also closed only by FinalizeEOF. The fixture covers the final",
+			"fragment path without a following Segment (no fabricated next document).",
 		),
 		Data: data,
 		Facts: Facts{
@@ -622,7 +632,7 @@ func tailLastFragment() Fixture {
 			SimpleBlocks:       3,
 			EBMLHeaders:        2,
 			UnknownSizeSegment: true,
-			KnownSizeCluster:   true,
+			KnownSizeCluster:   false,
 			ContactIDs:         []string{fakeContactA},
 			ProducerTimestamps: []string{"7000000000.000", "7000000001.024"},
 			FragmentNumbers:    []string{"tail-0", "tail-1"},
@@ -640,4 +650,81 @@ func joinLines(lines ...string) string {
 		out += l
 	}
 	return out
+}
+
+func connectRealShape() Fixture {
+	s := newStream()
+	s.ebmlHeader()
+	s.unknownMaster(matroska.IDSegment, func() {
+		s.info(segmentUID(0xC0), defaultTimestampScale)
+		s.tracks(true)
+		s.tagsWithPairs(
+			tagPair{"ContactId", fakeContactA},
+			tagPair{"InstanceId", fakeInstance},
+			tagPair{"MimeType", "audio/L16;rate=8000;channels=1"},
+			tagPair{"AUDIO_TO_CUSTOMER", "AUDIO_TO_CUSTOMER"},
+			tagPair{"AUDIO_FROM_CUSTOMER", "AUDIO_FROM_CUSTOMER"},
+		)
+		s.tagsWithPairs(
+			tagPair{"AWS_KINESISVIDEO_FRAGMENT_NUMBER", "connect-real-0"},
+			tagPair{"AWS_KINESISVIDEO_SERVER_TIMESTAMP", "1000000000.000"},
+			tagPair{"AWS_KINESISVIDEO_PRODUCER_TIMESTAMP", "1000000000.000"},
+		)
+		s.unknownTwoTrackCluster(0,
+			struct {
+				track uint64
+				block
+			}{1, block{0, pcm(24, 0x41)}},
+			struct {
+				track uint64
+				block
+			}{2, block{0, pcm(24, 0x51)}},
+			struct {
+				track uint64
+				block
+			}{1, block{10, pcm(24, 0x61)}},
+			struct {
+				track uint64
+				block
+			}{2, block{10, pcm(24, 0x71)}},
+		)
+		s.tagsWithPairs(
+			tagPair{"ContactId", fakeContactA},
+			tagPair{"InstanceId", fakeInstance},
+			tagPair{"MimeType", "audio/L16;rate=8000;channels=1"},
+			tagPair{"AUDIO_TO_CUSTOMER", "AUDIO_TO_CUSTOMER"},
+			tagPair{"AUDIO_FROM_CUSTOMER", "AUDIO_FROM_CUSTOMER"},
+		)
+		s.tagsWithPairs(
+			tagPair{"AWS_KINESISVIDEO_MILLIS_BEHIND_NOW", "0"},
+			tagPair{"AWS_KINESISVIDEO_CONTINUATION_TOKEN", fakeContinuation},
+		)
+	})
+	data := s.bytes()
+	return Fixture{
+		Name: "connect_real_shape",
+		Comment: joinLines(
+			"connect_real_shape: the real Amazon Connect layout with an unknown-size Segment",
+			"and unknown-size Cluster. Two separate Tags elements appear before the Cluster:",
+			"identity/audio tags, then fragment number and server/producer timestamps.",
+			"The Cluster carries four SimpleBlocks, two per named track. Two more separate",
+			"Tags elements appear after the Cluster; MILLIS_BEHIND_NOW and CONTINUATION_TOKEN",
+			"occur ONLY after it. All values are fabricated synthetic data.",
+		),
+		Data: data,
+		Facts: Facts{
+			Description:        "Real Connect-shaped one-fragment layout with four blocks and four Segment Tags elements.",
+			Fragments:          1,
+			Segments:           1,
+			Clusters:           1,
+			SimpleBlocks:       4,
+			EBMLHeaders:        1,
+			UnknownSizeSegment: true,
+			KnownSizeCluster:   false,
+			ContactIDs:         []string{fakeContactA},
+			ProducerTimestamps: []string{"1000000000.000"},
+			FragmentNumbers:    []string{"connect-real-0"},
+			Notes:              "Segment-level Tags appear both before and after the Cluster; AWS_KINESISVIDEO_MILLIS_BEHIND_NOW and AWS_KINESISVIDEO_CONTINUATION_TOKEN occur ONLY after it.",
+		},
+	}
 }
