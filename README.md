@@ -237,25 +237,6 @@ failure is ever dropped silently. `UnknownSizeLeafError` is typed so an
 unregistered unknown-size master can be diagnosed and fixed by extending the
 registry.
 
-### `go/kvs/examples/getmedia`
-
-`go/kvs/examples/getmedia` is a runnable, end-to-end demonstration of driving
-the separate `kvs` module over a live Amazon Connect KVS GetMedia byte stream.
-
-Tag inheritance is not something `ext/fragment` decides: `Fragment.Tags`
-returns exactly what that fragment's `Tags` element carried, non-nil and empty
-when it carried none. The policy lives one layer up, in `kvs`, and it inherits
-per key rather than per whole `Tags` element — a key seen on any fragment of a
-given SegmentUUID stays available to later fragments of that same UUID,
-regardless of which other keys the current fragment carries.
-This matches the field shape observed in production Amazon Connect streams,
-which is **partial** rather than all-or-nothing: `Tags` is present and
-populated, but an identity key such as `ContactId` can be missing from one
-fragment (typically the run's last) while the rest of the map is intact and
-the SegmentUUID is unchanged. A policy that only inherits when the whole
-`Tags` map is empty never fires on that shape and silently drops the identity
-key exactly when it is needed; the `partial_tags` fixture exercises it.
-
 ### `ext/tree`: two orthogonal access modes
 
 | Mode | Operations | Meaning |
@@ -309,6 +290,31 @@ func main() {
 	}
 }
 ```
+
+### Tag inheritance
+
+Tag inheritance is not something `ext/fragment` decides: `Fragment.Tags`
+returns exactly what that fragment's `Tags` element carried, non-nil and empty
+when it carried none. The policy lives one layer up, in `kvs`, and it inherits
+per key rather than per whole `Tags` element — a key seen on any fragment of a
+given SegmentUUID stays available to later fragments of that same UUID,
+regardless of which other keys the current fragment carries.
+This matches the field shape observed in production Amazon Connect streams,
+which is **partial** rather than all-or-nothing: `Tags` is present and
+populated, but an identity key such as `ContactId` can be missing from one
+fragment (typically the run's last) while the rest of the map is intact and
+the SegmentUUID is unchanged. A policy that only inherits when the whole
+`Tags` map is empty never fires on that shape and silently drops the identity
+key exactly when it is needed; the `partial_tags` fixture exercises it.
+
+`WithoutTagInheritance()` turns the policy off, and `Metadata.Tags` is then
+exactly what the fragment carried.
+
+### `examples/getmedia`
+
+`go/kvs/examples/getmedia` is a runnable, end-to-end demonstration of driving
+the module over a live Amazon Connect KVS GetMedia byte stream. Run it from
+`go/kvs`.
 
 ## Writing
 
