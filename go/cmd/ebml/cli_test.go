@@ -170,3 +170,37 @@ func TestUnknownCommandExits2(t *testing.T) {
 		t.Fatalf("expected exit 2 for no args, got %d", code)
 	}
 }
+
+// TestDumpClosesUnknownSizeCluster is the CLI's half of the round 2 F4 fix. The
+// command used to carry its own copy of the boundary rule, answering only about
+// EBML and Segment, so on the shape a live GetMedia stream actually sends -- an
+// unknown-size Cluster with Segment-level Tags after it -- every trailing Tags
+// element was rendered as a child of the Cluster. Sharing matroska.StreamBoundary
+// is what keeps the CLI and ext/fragment from reading the same bytes differently.
+func TestDumpClosesUnknownSizeCluster(t *testing.T) {
+	raw := loadFixture(t, "kvs/connect_real_shape.ebml.hex")
+	var out bytes.Buffer
+	if err := runDump(bytes.NewReader(raw), &out, dumpOptions{maxBinary: 0}); err != nil {
+		t.Fatalf("runDump: %v", err)
+	}
+
+	// Segment children are indented once; a Cluster child twice. All four Tags
+	// elements of this fixture are Segment children -- two before the Cluster and
+	// two after it -- so none may appear at the deeper indent.
+	var segmentTags, clusterTags int
+	for _, line := range strings.Split(out.String(), "\n") {
+		switch {
+		case strings.HasPrefix(line, "  Tags ("):
+			segmentTags++
+		case strings.HasPrefix(line, "    Tags ("):
+			clusterTags++
+		}
+	}
+	if segmentTags != 4 || clusterTags != 0 {
+		t.Errorf("Tags elements: %d as Segment children, %d as Cluster children; want 4 and 0\n%s",
+			segmentTags, clusterTags, out.String())
+	}
+	if !strings.Contains(out.String(), "Cluster (0x1F43B675) [offset 639, size unknown]") {
+		t.Errorf("dump did not report an unknown-size Cluster\n%s", out.String())
+	}
+}

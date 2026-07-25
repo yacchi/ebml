@@ -40,3 +40,31 @@ func (r *Registry) KindForElementID(id parser.ElementID) parser.Kind {
 func KindForElementID(id parser.ElementID) parser.Kind {
 	return Default().KindForElementID(id)
 }
+
+// StreamBoundary is the parser.BoundaryFunc for a stream of concatenated EBML
+// documents, which is what a KVS GetMedia body is. It answers in two halves:
+//
+//   - a new top-level element (EBML, Segment) ends whatever master is open, so
+//     consecutive documents follow one another instead of nesting; and
+//   - otherwise the RFC 9559 child rule applies, so an unknown-size master such
+//     as a Cluster ends at the first element that cannot be its child.
+//
+// The second half is deny-only -- see Registry.EndsUnknownSizeMaster -- so an
+// element this registry does not know never ends a master. The rule is driven
+// entirely by element structure and never by scanning payload bytes for the
+// EBML magic, which PCM may contain.
+//
+// This is the whole boundary policy for such a stream, in one place: it is what
+// ext/fragment's assembler and the ebml CLI are both built on, so neither can
+// drift from the other.
+func (r *Registry) StreamBoundary(open, next parser.ElementID) bool {
+	if next == IDEBML || next == IDSegment {
+		return true
+	}
+	return r.EndsUnknownSizeMaster(open, next)
+}
+
+// StreamBoundary applies the built-in element set; see Registry.StreamBoundary.
+func StreamBoundary(open, next parser.ElementID) bool {
+	return Default().StreamBoundary(open, next)
+}

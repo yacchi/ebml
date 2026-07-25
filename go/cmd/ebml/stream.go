@@ -28,16 +28,15 @@ type stream struct {
 }
 
 // newStream reads raw EBML from r, classifying elements through the standard
-// Matroska registry. Its boundary rule is the one a stream of concatenated
-// unknown-size Segments needs -- a KVS GetMedia body is exactly that: a Segment
-// ends where the next top-level element begins. The rule is driven by element
-// structure, never by scanning the bytes for the EBML magic, which PCM may contain.
+// Matroska registry and closing unknown-size masters with matroska's own
+// StreamBoundary -- the same policy ext/fragment is built on, not a copy of it.
+// A KVS GetMedia body needs both halves of that rule: a Segment ends where the
+// next top-level element begins, and an unknown-size Cluster ends at the first
+// element that cannot be its child. Without the second half the CLI renders a
+// live stream's trailing Tags as children of its Cluster.
 func newStream(r io.Reader) *stream {
 	return &stream{
-		c: parser.NewCursor(matroska.KindForElementID, parser.WithBoundary(
-			func(open, next parser.ElementID) bool {
-				return next == matroska.IDEBML || next == matroska.IDSegment
-			})),
+		c:   parser.NewCursor(matroska.KindForElementID, parser.WithBoundary(matroska.StreamBoundary)),
 		r:   r,
 		buf: make([]byte, 64*1024),
 	}

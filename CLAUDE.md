@@ -53,6 +53,18 @@ carries no meaning.
   `parser.NewCursor` (there is no option form and no built-in default; `nil`
   panics). Element IDs live only in `go/matroska`. A default would silently read
   an unlisted master as one opaque leaf, so never reintroduce one.
+* The boundary policy for a stream of concatenated documents lives in exactly ONE
+  place, `matroska.StreamBoundary`: a new top-level element ends any open master,
+  and otherwise the RFC 9559 child rule ends an unknown-size master at the first
+  element that cannot be its child. That second half is DENY-ONLY
+  (`Registry.EndsUnknownSizeMaster`) — a boundary is reported only when the
+  registry holds a COMPLETE child list for the open master and `next` is a
+  built-in, non-global element absent from it, because a false boundary corrupts
+  the parse while a missed one only closes later than it could. `ext/fragment`
+  and `go/cmd/ebml` both call it and neither restates it. They did once: the CLI
+  kept its own copy answering only about `EBML`/`Segment`, and so rendered a live
+  stream's trailing `Tags` inside its `Cluster` while the assembler read the same
+  bytes correctly. Never reintroduce a second copy.
 * `CloseMaster` is explicit boundary closure only. It accepts an unknown-size
   master, or a known-size master already at its declared end, and rejects a
   known-size master with payload outstanding (`PrematureCloseError`); a

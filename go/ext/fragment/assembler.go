@@ -236,17 +236,18 @@ func (a *Assembler) newCursor(startOffset int64) *parser.Cursor {
 	)
 }
 
-// segmentBoundary is the whole fragment-boundary rule: a new top-level document
-// ends an unknown-size Segment, and the RFC 9559 containment rule ends an
-// unknown-size Cluster at the first element that cannot be its child. It is
-// structural -- it answers about an element header the cursor parsed, never
-// about a byte pattern found by scanning -- so media data containing the EBML
-// magic cannot split a fragment.
+// segmentBoundary is the fragment-boundary rule, and it is matroska's own: a
+// new top-level document ends an unknown-size Segment, and the RFC 9559
+// containment rule ends an unknown-size Cluster at the first element that
+// cannot be its child. It is structural -- it answers about an element header
+// the cursor parsed, never about a byte pattern found by scanning -- so media
+// data containing the EBML magic cannot split a fragment.
+//
+// It is not restated here. A second copy of this policy is exactly how the
+// CLI came to render a live stream's trailing Tags inside its Cluster while
+// the assembler read the same bytes correctly.
 func segmentBoundary(open, next parser.ElementID) bool {
-	if next == matroska.IDEBML || next == matroska.IDSegment {
-		return true
-	}
-	return matroska.EndsUnknownSizeMaster(open, next)
+	return matroska.StreamBoundary(open, next)
 }
 
 // Feed pushes a chunk of the stream into the assembler and returns every Fragment
