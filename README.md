@@ -385,3 +385,12 @@ go test ./...
 go vet ./...
 go run ./cmd/ebml genkvs
 ```
+
+## License
+
+Apache-2.0 (`SPDX-License-Identifier: Apache-2.0`). See [LICENSE](LICENSE).
+
+This project is not affiliated with, endorsed by, or sponsored by Amazon Web
+Services. The fixture corpus and `examples/kvs-getmedia` are written for use
+with Amazon Kinesis Video Streams; that service name appears here descriptively
+only, and all fixture data is synthetic.
