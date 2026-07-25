@@ -14,6 +14,11 @@ carries no meaning.
 * Everything under `go/ext/` is optional Go convenience built solely on exported
   core API. If an extension needs an unavailable capability, fix the core; do
   not reach into internals or add a workaround in the extension.
+* `ext/scope` is element-agnostic and follows one master by depth regression,
+  never by pairing EndNodes, because `MasterNode.Skip` emits no EndNode. It
+  retains only directly completed children and has no configuration or lexical
+  chaining: neither EBML nor Matroska defines scope inheritance, so a consumer
+  wanting two levels runs two Trackers and states its own precedence.
 * The reading core has exactly ONE surface: a streaming pull operation, `Cursor.Next`,
   returning a closed `Node` (`*MasterNode`/`*LeafNode`/`*EndNode`) one event at a
   time, not a document model. Never add a second push or callback event shape.
@@ -208,6 +213,14 @@ The core is working and tested:
  cursor. The CLI's private stream driver is gone; `go/kvs.Reader` remains a
  byte-oriented assembler driver because it consumes `Assembler.Feed`, not cursor
  nodes.
+* `go/ext/scope` tracks any master and the elements that completed directly
+  inside it. It is element-agnostic and unwinds by node-depth regression, never
+  by pairing EndNodes, because `MasterNode.Skip` emits no EndNode. Only observed
+  nodes exist in a scope, with no configured retain policy or element allowlist;
+  descendants remain in retained child subtrees but are not direct-child
+  queries. Scopes have no lexical chaining or inheritance: neither EBML nor
+  Matroska defines it, so a consumer wanting two levels runs two Trackers and
+  states its own precedence.
 * `go/kvs` is a separate module holding all KVS-specific tag and metadata
   knowledge; the core module has no KVS element or tag knowledge left. The
   runnable example moved to `go/kvs/examples/getmedia`.

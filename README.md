@@ -280,6 +280,52 @@ failure is ever dropped silently. `UnknownSizeLeafError` is typed so an
 unregistered unknown-size master can be diagnosed and fixed by extending the
 registry.
 
+### `ext/scope`
+
+`scope.Tracker` follows any master element and retains the elements that
+completed directly inside it. It holds no element knowledge: what is not
+observed is not in the scope, including everything under a skipped master.
+`Get` and `GetAll` never search descendants; use `tree.Element.Descendants` on
+a returned child when deeper access is wanted.
+
+```go
+package main
+
+import (
+"bytes"
+"errors"
+"io"
+
+"github.com/yacchi/ebml/ext/scope"
+"github.com/yacchi/ebml/ext/stream"
+"github.com/yacchi/ebml/matroska"
+"github.com/yacchi/ebml/parser"
+)
+
+func main() {
+s := stream.New(bytes.NewReader(nil), matroska.KindForElementID)
+t := scope.NewTracker(matroska.IDSegment, s)
+for {
+	n, err := s.Next()
+	if errors.Is(err, io.EOF) {
+		_ = t.Finish()
+		return
+	}
+	if err != nil {
+		panic(err)
+	}
+	_, _ = t.Observe(n)
+	if m, ok := n.(*parser.MasterNode); ok {
+		if m.ID() == matroska.IDCluster {
+			m.Skip()
+		} else {
+			m.Descend()
+		}
+	}
+}
+}
+```
+
 ### `ext/tree`: two orthogonal access modes
 
 | Mode | Operations | Meaning |
