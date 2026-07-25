@@ -22,3 +22,6 @@ dist/
 # works and are never committed here; the conformance-check skill downloads
 # them into this cache when it needs them.
 /.spec-cache/
+
+# Local plans and notes
+/plans/
