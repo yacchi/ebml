@@ -6,13 +6,15 @@
 // KVS split-invariance test (to verify every chunking reproduces the golden),
 // so both use one implementation of "run the cursor".
 //
-// Beyond the README's basic loop, Trace adds one KVS-specific rule: an
-// unknown-size master (a KVS Segment) is closed when the cursor peeks a new
-// top-level element (EBML header or Segment) — the boundary between concatenated
-// GetMedia fragments. This close is driven purely by element structure (via the
-// public CloseMaster API), never by scanning the bytes for the EBML magic, which
-// is what lets PCM payloads containing the magic bytes parse without a spurious
-// split.
+// Beyond the README's basic loop, Trace closes an unknown-size master where
+// matroska.StreamBoundary says it ends: at a new top-level element, and at the
+// first element that cannot be a child of the open master. That is the rule the
+// library itself applies, and Trace calls it rather than restating it -- a
+// golden trace produced by a rule the shipped reader does not use would be a
+// conformance corpus for a reader nobody has. The close is driven purely by
+// element structure (via the public CloseMaster API), never by scanning the
+// bytes for the EBML magic, which is what lets PCM payloads containing the
+// magic bytes parse without a spurious split.
 package ebmltrace
 
 import (
@@ -94,10 +96,11 @@ func Trace(chunks [][]byte, classifier parser.KindClassifier) ([]Event, int, err
 				continue
 			}
 
-			// Unknown-size master (KVS Segment) boundary: a new top-level element
-			// begins the next fragment. Close the open Segment explicitly.
+			// Unknown-size master boundary. The rule is matroska's own, never a
+			// copy: a golden trace that closed masters differently from the
+			// library would be a conformance corpus for a reader nobody ships.
 			if len(mstack) > 0 && mstack[len(mstack)-1].unknown &&
-				(h.ID == matroska.IDEBML || h.ID == matroska.IDSegment) {
+				matroska.StreamBoundary(mstack[len(mstack)-1].id, h.ID) {
 				step++
 				events = append(events, Event{Step: step, Op: "leave", Offset: p.Offset(), Depth: p.Depth()})
 				if err := p.CloseMaster(); err != nil {
