@@ -158,6 +158,12 @@ reported once, at the depth that remains.
 Boundary detection must never scan payload bytes for the EBML header magic.
 Payload data may contain that byte sequence.
 
+Containment-based boundary rules must be deny-only over fully enumerated child
+lists: an element may end an unknown-size master only when the registry knows it
+is registered and cannot be a direct child (global elements do not end it).
+Unknown or unlisted elements must not end the master. A false boundary corrupts
+the parse, while a missed boundary only delays closure.
+
 ## 2. Cursor contract
 
 The cursor accepts append-only chunks. A chunk may end anywhere, including in an

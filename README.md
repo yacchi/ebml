@@ -141,9 +141,13 @@ construction.
 
 Without a `parser.WithBoundary` rule every unknown-size master stays open until
 `Finalize`, so concatenated `Segment`s would nest instead of following one another.
-The rule is driven by element structure and never by scanning the payload for the
-EBML magic, which is what lets PCM containing those four bytes parse without a
-spurious split.
+The fragment boundary rule ends any open master when a new top-level document
+begins, and ends an unknown-size `Cluster` at the first registered element that
+cannot be its child. It is deny-only: an element the registry does not know never
+ends a master, because a false boundary corrupts the parse while a missed
+boundary only delays closure. The rule is driven by element structure and never
+by scanning the payload for the EBML magic, which is what lets PCM containing
+those four bytes parse without a spurious split.
 
 The lower-level `parser.Parser` remains exported for a consumer that needs
 operation-level control (the golden op-trace tool does): `Feed`, `Peek`,

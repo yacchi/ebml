@@ -206,6 +206,64 @@ func (r *Registry) TypeFor(id parser.ElementID) (ValueType, bool) {
 	return info.Type, true
 }
 
+// LegalChildren returns the element IDs the RFC 9559 schema allows directly
+// inside master, and false when this registry has no COMPLETE child list for
+// it. An incomplete list is never returned: a boundary rule that ended a
+// master on a missing entry would corrupt the parse, so "no complete list" and
+// "not a child" must stay distinguishable.
+//
+// NewRegistry and Register cannot declare containment for vendor elements. A
+// vendor element is therefore never used as a boundary, which is the safe
+// behavior.
+func (r *Registry) LegalChildren(master parser.ElementID) ([]parser.ElementID, bool) {
+	if r == nil {
+		return nil, false
+	}
+	if r.immutable {
+		if children, ok := completeChildren[master]; ok {
+			result := append([]parser.ElementID(nil), children...)
+			sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+			return result, true
+		}
+		return nil, false
+	}
+	if _, own := r.entries[master]; own {
+		return nil, false
+	}
+	return r.base.LegalChildren(master)
+}
+
+// EndsUnknownSizeMaster reports whether next must end an open unknown-size
+// master per RFC 9559: it is true only when this registry has a COMPLETE child
+// list for open, and next is a REGISTERED element that is neither in that list
+// nor global. It is false whenever the answer is not certain -- an unknown
+// master, an unregistered next, or a global element -- because the cost of a
+// false positive is a corrupted parse and the cost of a false negative is only
+// a master that closes later than it could.
+func (r *Registry) EndsUnknownSizeMaster(open, next parser.ElementID) bool {
+	children, ok := r.LegalChildren(open)
+	if !ok {
+		return false
+	}
+	if _, ok := globalElements[next]; ok {
+		return false
+	}
+	// Only a BUILT-IN element can be a boundary. Testing the built-in table
+	// rather than Lookup is deliberate and subsumes it: an ID this registry
+	// knows only because a caller registered it has no schema position here, so
+	// the complete child lists above say nothing about it and it must not end a
+	// master. An ID nobody knows at all fails the same test.
+	if _, ok := elements[next]; !ok {
+		return false
+	}
+	for _, child := range children {
+		if child == next {
+			return false
+		}
+	}
+	return true
+}
+
 // IDForName returns the ID registered for an exact element name, searching this
 // registry before its base.
 //
@@ -265,6 +323,19 @@ func Describe(id parser.ElementID) string { return Default().Describe(id) }
 
 // TypeFor returns the built-in value type of id. See Registry.TypeFor.
 func TypeFor(id parser.ElementID) (ValueType, bool) { return Default().TypeFor(id) }
+
+// LegalChildren returns the built-in complete child list for master, if one is
+// available. See Registry.LegalChildren.
+func LegalChildren(master parser.ElementID) ([]parser.ElementID, bool) {
+	return Default().LegalChildren(master)
+}
+
+// EndsUnknownSizeMaster reports whether next structurally ends an open unknown-
+// size master according to the built-in RFC 9559 containment lists. See
+// Registry.EndsUnknownSizeMaster.
+func EndsUnknownSizeMaster(open, next parser.ElementID) bool {
+	return Default().EndsUnknownSizeMaster(open, next)
+}
 
 // IDForName returns the built-in ID for an exact element name, accepting
 // well-known pre-RFC 9559 aliases. See Registry.IDForName.

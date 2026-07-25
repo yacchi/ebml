@@ -243,6 +243,25 @@ var elements = map[parser.ElementID]ElementInfo{
 	IDFileDescription:    {IDFileDescription, "FileDescription", TypeUTF8},
 }
 
+// Global elements the schema allows inside any master.
+var globalElements = map[parser.ElementID]struct{}{
+	IDCRC32: {},
+	IDVoid:  {},
+}
+
+// Complete child lists for the only masters whose direct containment is
+// enumerated here. Deprecated Cluster children (SilentTracks and
+// EncryptedBlock) are deliberately absent: an unknown or unregistered child
+// must never cause an early boundary.
+var completeChildren = map[parser.ElementID][]parser.ElementID{
+	IDSegment: {
+		IDSeekHead, IDInfo, IDCluster, IDTracks, IDCues, IDAttachments, IDChapters, IDTags,
+	},
+	IDCluster: {
+		IDTimestamp, IDPosition, IDPrevSize, IDSimpleBlock, IDBlockGroup,
+	},
+}
+
 // names is the reverse index of elements, keyed by the canonical RFC 9559 name.
 var names = func() map[string]parser.ElementID {
 	result := make(map[string]parser.ElementID, len(elements))

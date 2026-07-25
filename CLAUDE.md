@@ -141,9 +141,12 @@ The core is working and tested:
   `parser.NewContentError` marks a consumer's content verdict as the other class.
 * `go/matroska` is the immutable RFC 9559 registry. `Default`, `NewRegistry`,
   `Register`, `Override`, `Lookup`, `NameForID`, `Describe`, `IDForName`,
-  `Elements`, `TypeFor`, `ValueType`, and `KindForElementID` provide standard
-  knowledge and vendor extensibility. Unknown IDs classify as readable binary
-  leaves.
+  `Elements`, `TypeFor`, `LegalChildren`, `EndsUnknownSizeMaster`, `ValueType`,
+  and `KindForElementID` provide standard knowledge and vendor extensibility.
+  `LegalChildren` and `EndsUnknownSizeMaster` use deny-only complete RFC 9559
+  containment lists; `ext/fragment` now ends an unknown-size Cluster at the
+  first registered element that cannot be its child. Unknown IDs classify as
+  readable binary leaves and never trigger a containment boundary.
 * `go/ext/tree` retains a generic tree and implements loose `Descendants` and
   strict `Find`/ancestry navigation. `Marshal`/`MarshalBytes` write a tree back
   out; parse then marshal is BYTE-IDENTICAL for every committed fixture unless a
@@ -184,15 +187,13 @@ Writing and round-trip conformance are complete. The pull cursor, its lazy flow
 control, iterator caveat, and Go extensions are documented; remaining work is
 focused on broader reading conformance and Matroska coverage:
 
-1. BLOCKER (`KVS-CONSUMER-FEEDBACK.md`, Round 2 F4/F5): `ext/fragment` never
-   closes an unknown-size `Cluster`, because `segmentBoundary` answers only
-   about `EBML`/`Segment` while the cursor asks about the INNERMOST open master
-   — which on real Amazon Connect data is the Cluster. The core mechanism is
-   correct and now covered (`go/parser/nested_unknown_size_test.go`); the gap is
-   in the extension, and `fragment.New` exposes no hook for a consumer to fix it
-   from outside. F5 is why no test caught it: the synthetic corpus models a
-   KNOWN-size Cluster, a topology the field does not produce. Fixing F4 without
-   also correcting the corpus would leave the same blind spot.
+1. BLOCKER (`KVS-CONSUMER-FEEDBACK.md`, Round 2 F5): the synthetic corpus still
+   models a KNOWN-size Cluster, while the field uses an UNKNOWN-size Cluster.
+   F4 is complete: `matroska` supplies deny-only complete containment lists and
+   `ext/fragment` closes an unknown-size Cluster at the first registered element
+   that cannot be its child. F5 matters because correcting only the extension
+   while leaving the corpus topology unchanged would preserve the same blind
+   spot in generated fixtures and goldens.
 2. Add CRC-32 validation; CRC-32 and Void are currently opaque skippable leaves.
    Note it cannot live in `go/parser`, which holds no element knowledge.
 3. Broaden Matroska value and element coverage beyond the KVS fragment shape.
