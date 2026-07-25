@@ -7,7 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/yacchi/ebml-reader/fragment"
+	"github.com/yacchi/ebml-reader/ext/fragment"
+	"github.com/yacchi/ebml-reader/matroska"
 )
 
 // Example_streamingAssembly shows the whole loop: construct an assembler, push
@@ -42,19 +43,25 @@ func Example_streamingAssembly() {
 
 	for _, f := range fragments {
 		contactID, _ := f.Tag("ContactId")
-		fmt.Printf("ContactId=%s\n", contactID)
-		for _, tr := range f.Tracks {
-			fmt.Printf("track %d: %d PCM bytes\n", tr.Number, len(f.TrackPCM(tr.Number)))
+		fmt.Printf("ContactId=%s start=%s\n", contactID, f.StartTime())
+		for _, track := range f.Tracks() {
+			number, err := track.Find(matroska.IDTrackNumber).AsUint()
+			if err != nil {
+				continue
+			}
+			fmt.Printf("track %d %s: %d PCM bytes\n",
+				number, track.Find(matroska.IDName).AsString(), len(f.TrackPCM(number)))
 		}
 	}
 	// Output:
-	// ContactId=00000000-0000-4000-8000-000000000001
-	// track 1: 96 PCM bytes
+	// ContactId=00000000-0000-4000-8000-000000000001 start=0s
+	// track 1 AUDIO_FROM_CUSTOMER: 96 PCM bytes
+	// track 2 AUDIO_TO_CUSTOMER: 0 PCM bytes
 }
 
 // loadFixtureBytes decodes a committed .ebml.hex fixture (comment lines removed).
 func loadFixtureBytes(name string) []byte {
-	path := filepath.Join("..", "..", "fixtures", "kvs", name+".ebml.hex")
+	path := filepath.Join("..", "..", "..", "fixtures", "kvs", name+".ebml.hex")
 	b, err := os.ReadFile(path)
 	if err != nil {
 		panic(err)

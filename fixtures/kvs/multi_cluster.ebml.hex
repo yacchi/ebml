@@ -1,12 +1,18 @@
 # multi_cluster: ONE EBML header + ONE unknown-size Segment containing
-# Tracks, Tags, and TWO known-size Clusters. Each Cluster has a Timestamp
+# Info, Tracks, Tags, and TWO known-size Clusters. Each Cluster has a Timestamp
 # and two SimpleBlocks. Both Cluster end_master events occur before the
 # Segment is closed by FinalizeEOF.
-# bytes=543
+# bytes=639
 1a45dfa3934286810142f78101428288
 6d6174726f736b611853806701ffffff
-ffffffff1654ae6b97ae95d781018381
-02868d415f50434d2f494e542f4c4954
+ffffffff1549a9669a73a49020212223
+2425262728292a2b2c2d2e2f2ad7b183
+0f42401654ae6bd8aeabd78101838102
+868d415f50434d2f494e542f4c495453
+6e93415544494f5f46524f4d5f435553
+544f4d4552aea9d78102838102868d41
+5f50434d2f494e542f4c4954536e9141
+5544494f5f544f5f435553544f4d4552
 1254c36741507373414c63c08067c8b7
 45a3a34157535f4b494e455349535649
 44454f5f50524f44554345525f54494d

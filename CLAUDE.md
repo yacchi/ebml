@@ -1,191 +1,103 @@
-# CLAUDE.md — ebml-reader
+# CLAUDE.md - ebml-reader
 
-Guidance for Claude Code (and human contributors) working in this repository.
+This repository is English-only. It is a streaming, cursor-based EBML/Matroska
+reader for Go 1.22, rooted at `go/` and published as
+`github.com/yacchi/ebml-reader`.
 
-**Language: this repo is English-only.** It is OSS-destined and the audience
-(streaming-capable EBML readers) is niche, so English maximizes reach. Write all
-new docs, comments, manifests, and identifiers in English.
+## Architecture and standing design rules
 
-## What this is
-
-A **streaming, cursor-based EBML/Matroska reader** (MVP/experiment). Its
-distinguishing goal versus typical whole-document or push (SAX) parsers: parse a
-continuous MKV byte stream **incrementally** and let the caller observe each
-element as it completes — in particular, fire "end master" for a **known-size
-`Cluster` nested inside an unknown-size `Segment`** the moment the Cluster's
-declared size is consumed, **without waiting for the Segment to close**.
-
-## Why (motivating use case)
-
-Live **Amazon Kinesis Video Streams (KVS) GetMedia** returns a single continuous
-HTTP body of concatenated **unknown-size Matroska `Segment`s** — one per KVS
-fragment. Each Segment contains `Tracks` + `Tags` + exactly one **known-size
-`Cluster`** of `SimpleBlock`s (for Amazon Connect: 8 kHz / 16-bit PCM, one mono
-stream per channel).
-
-A consumer using a whole-document parser can only emit a fragment once its
-Segment is known to be over — i.e. when the **next** fragment's EBML header
-arrives, or on connection EOF. That produces two latency problems:
-
-1. **Boundary-wait** (~one fragment): a fragment can't be emitted until the next
-   one's header shows up.
-2. **End-of-stream tail**: the **last** fragment has no following header, so it is
-   held until the connection actually closes (EOF) — adding seconds of latency at
-   call end.
-
-A cursor that fires `end_master` for the Cluster as soon as its known size is
-consumed removes **both**. It also removes the need to **byte-scan** the stream
-for the EBML magic (`1A 45 DF A3`) to find fragment boundaries — a fragile
-heuristic, because that 4-byte sequence can occur inside SimpleBlock PCM. This
-library aims to be that cursor.
+* The CORE is `go/parser` plus `go/matroska`: the cursor, event model, flow
+  control, VINT behavior, and element registry. It is the only cross-language
+  contract and is specified in `spec/SPEC.md`.
+* Everything under `go/ext/` is optional Go convenience built solely on exported
+  core API. If an extension needs an unavailable capability, fix the core; do
+  not reach into internals or add a workaround in the extension.
+* The cursor is a streaming event source, not a document model. Retention is
+  consumer policy. Header decisions are `Descend` or `SkipSubtree` for masters
+  and `ReadPayload` or `SkipPayload` for leaves.
+* `go/parser` holds NO element knowledge: no element table and not one element ID
+  literal in its non-test source. All classification comes from the supplied
+  `KindClassifier`, which is a REQUIRED argument of `parser.New` and
+  `parser.NewScanner` (there is no option form and no built-in default; `nil`
+  panics). Element IDs live only in `go/matroska`. A default would silently read
+  an unlisted master as one opaque leaf, so never reintroduce one.
+* `CloseMaster` is explicit boundary closure only. It accepts an unknown-size
+  master, or a known-size master already at its declared end, and rejects a
+  known-size master with payload outstanding (`PrematureCloseError`); a
+  known-size boundary belongs to the stream and must not be discarded.
+  `LeaveMaster` remains the ordinary close at a declared end.
+* The two access modes exist only in `ext`: loose extraction ignores containment
+  and returns every matching node; strict access uses exact paths and ancestry.
+  Loose nodes retain their structure so the modes compose.
+* No retention path uses a per-element allowlist. Unknown elements remain
+  readable, and an unknown master-shaped payload can be re-parsed later.
+* Errors have exactly two classes plus flow control, and the classification is
+  part of the core contract: `parser.IsStructural(err)` is the canonical test and
+  is true for every STRUCTURAL failure of the cursor. An error a `Handler`
+  returned is wrapped in `*parser.HandlerError`, is never structural whatever
+  value it carries, and still unwraps to the handler's own error; `NeedMoreData`
+  is neither class. The predicate owns the handler boundary because `errors.Is`
+  traverses the whole chain and cannot stop there; `parser.ErrStructural` remains
+  only as the marker the cursor's own errors unwrap to. Keep every new cursor
+  failure in the structural class and never classify by message text.
+* Byte scanning is allowed only for opt-in post-failure resynchronization AFTER a
+  structural failure (`parser.IsStructural(err)`). It is never
+  boundary detection, and a handler/content error must never trigger it: such an
+  error is terminal and returned to the caller unchanged.
+* There is no query DSL or second index type.
 
 ## Current state
 
-**Working** (`go/`, module `github.com/yacchi/ebml-reader`, Go 1.22):
+The core is working and tested:
 
-- Cursor primitives in `go/parser/parser.go`: `Feed`, `Peek`, `ConsumeHeader`,
-  `EnterMaster`, `LeaveMaster`, `CloseMaster`, `SkipPayload`/`SkipCurrentPayload`,
-  `ReadPayload`, `FinalizeEOF`. Incremental via `Feed(chunk)` + a `NeedMoreData`
-  signal; **split-invariant** (identical result regardless of how the input is
-  chunked). `ReadPayload` returns a leaf element's full bytes (not just skip).
-- VINT parsing incl. unknown-size detection (`go/parser/vint.go`), enforcing
-  `MaxElementIDLength`/`MaxElementSizeLength` (`go/parser/elements.go`) and
-  reporting over-length VINTs as `VINTLengthError` (`go/parser/errors.go`).
-- **Typed element IDs and registry API**: `parser.ElementID`
-  (`go/parser/elements.go`) is the wire VINT value *including* its length-marker
-  bits, and flows through `ElementHeader.ID`, `KindClassifier`, `ClosedMaster`
-  and the typed errors. Its `String()` is the EBML-conventional form
-  (`0xA3`, `0x1F43B675`). `parser` keeps **no element table**: it has only an
-  unexported default classifier that treats the EBML header and `Segment` as
-  masters and everything else as a binary leaf, so real streams must be driven
-  with `matroska.KindForElementID`. `go/matroska` is the single source of truth:
-  its registry API provides `Lookup`, `NameForID`, `Describe`, `IDForName`,
-  `Elements`, `TypeFor`, and `ValueType` (whose `String()` gives the value type
-  label), alongside an `ID<Name>` constant for every registered element, such
-  as `matroska.IDSegmentUUID`. Element names/IDs/types follow **RFC 9559** (it
-  supersedes the older matroska.org names — `SegmentUUID`, `FileMediaType`,
-  `Timestamp`/`TimestampScale`); `IDForName` additionally accepts well-known
-  pre-RFC names as aliases, and only `IDForName` does. `TypeBlock`
-  (`SimpleBlock`/`Block`) is a deliberate library-level refinement of the RFC's
-  binary type, not a spec type.
-- **Malformed-input guards**: `FinalizeEOF` reports EOF inside a partial header
-  or unfinished declared payload as `TruncatedError`, and a child element whose
-  extent overflows its known-size parent master yields `ElementOverflowError`
-  (`go/parser/errors.go`, exercised in `go/parser/defects_test.go`).
-  `ParseSimpleBlock` rejects track number 0; reserved flag bits (0x70) are
-  deliberately tolerated.
-- **Standard Matroska element registry + generic classifier** (`go/matroska/`):
-  `KindForElementID`, the element table (keyed by `parser.ElementID`) and the
-  `ID<Name>` constants — the single source of truth for element IDs and
-  names, used by `fragment`, the CLI and the fixture generator. Drive the parser with
-  `parser.New(parser.WithKindClassifier(matroska.KindForElementID))` so
-  `Segment`/`Cluster`/`Tags`/`Tracks`/`TrackEntry`/`SimpleBlock`/... classify
-  as master vs leaf correctly. (Without it the parser's minimal default
-  classifier applies, so a `Cluster` would be read as one opaque binary blob.) `CRC-32` and
-  `Void` elements classify as skippable binary leaves — their bytes are not
-  validated/interpreted, just skipped by declared size. `parser` stays the
-  bottom layer and does not import `matroska`; the KVS stream needs no
-  library-side special elements — the standard registry covers it and
-  consumers read AWS metadata themselves via the generic tag map.
-- **Leaf value decoding** (`go/parser/decode.go`, `go/parser/block.go`):
-  `DecodeUint`, `DecodeInt`, `DecodeFloat`, `DecodeString` for scalar leaf
-  payloads, and `ParseSimpleBlock` for a Matroska `SimpleBlock` (track-number
-  VINT, int16 relative timecode, flags, and Xiph/fixed/EBML lacing) into a
-  `*SimpleBlock` with per-frame `[][]byte`.
-- **Generic per-fragment assembly** (`go/fragment/`): `fragment.New()` returns an
-  `Assembler` that drives the cursor over a continuous EBML/Matroska byte stream
-  and emits one `*Fragment` per completed `Cluster`, with that Segment's buffered
-  `Tags`/`Tracks` attached (`Tags`, `Tracks`, `ClusterTimestamp`, `Blocks`).
-  `Fragment` exposes a generic `Tag(name)` accessor (consumers read
-  AWS metadata like `AWS_KINESISVIDEO_FRAGMENT_NUMBER` themselves) and
-  `TrackPCM(trackNumber)`. A Segment with multiple
-  Clusters yields multiple Fragments sharing its Tags/Tracks; a tagless
-  Segment yields a Fragment with an empty tag map. See
-  `go/fragment/example_test.go` (`Example_streamingAssembly`).
-- **Synthetic KVS test corpus** proving the KVS topology and real-world quirks:
-  `fixtures/kvs/*.ebml.hex` + `golden/kvs/*.jsonl`, exercised by
-  `go/matroska/kvs_fixture_test.go` across every split pattern. 9 cases:
-  - `topology_basic`, `tail_last_fragment` — known-size Cluster inside an
-    unknown-size Segment; the Segment is closed **only** by `FinalizeEOF`, while
-    the Cluster's end is observable earlier (the tail-fix property).
-  - `false_ebml_magic_in_pcm` — a SimpleBlock whose PCM literally contains
-    `1A 45 DF A3`; the cursor must read it as one sized leaf and **not** mis-split
-    (proves the structural reader beats byte-scanning).
-  - `multi_cluster` — multiple known-size Clusters in one Segment, each
-    emitting its own Fragment.
-  - `multi_segment`, `tagless_single`, `tagless_consecutive`, `filter_mismatch`
-    (ContactId change mid-stream), `gap` (dropped fragment).
-- **Fixture generator** (100% synthetic): `go/internal/kvsgen/`, driven by the
-  `genkvs` subcommand of `go/cmd/ebml-reader/`.
-- **CLI** (`go/cmd/ebml-reader/`, binary `ebml-reader`): `dump` (indented
-  element tree), `xml` (well-formed XML), and `genkvs` (regenerate the fixture
-  corpus). `dump`/`xml` stream raw EBML from a FILE or stdin; `--hex` decodes the
-  commented-hex fixture format instead.
-- **Fuzz target**: `FuzzParser` (`go/parser/fuzz_test.go`) seeds from the
-  committed fixtures and drives the cursor over arbitrary/mutated bytes,
-  guarding against panics on malformed input.
+* `go/parser` provides incremental cursor primitives and `Scanner`/`Handler`
+  events. `Node` carries ID, kind, depth, offset, header length, declared size,
+  end offset, and `OpenMasters()`. `BoundaryDecider` closes unknown-size masters
+  structurally when a consumer recognizes the next top-level header.
+* VINT parsing recognizes unknown sizes, rejects element-ID VINTs over 4 bytes
+  and size VINTs over 8 bytes with `VINTLengthError`, and reports
+  `NeedMoreData`, `TruncatedError`, `ElementOverflowError`,
+  `UnknownSizeLeafError`, and `PrematureCloseError` as specified. Every one of
+  those failures except `NeedMoreData` satisfies `parser.IsStructural`, and
+  `Scanner` wraps handler errors in `*parser.HandlerError`.
+* `go/matroska` is the immutable RFC 9559 registry. `Default`, `NewRegistry`,
+  `Register`, `Override`, `Lookup`, `NameForID`, `Describe`, `IDForName`,
+  `Elements`, `TypeFor`, `ValueType`, and `KindForElementID` provide standard
+  knowledge and vendor extensibility. Unknown IDs classify as readable binary
+  leaves.
+* `go/ext/tree` retains a generic tree and implements loose `Descendants` and
+  strict `Find`/ancestry navigation. `go/ext/fragment` assembles one
+  `Fragment` per completed `Cluster` using only exported core APIs.
+* The CLI supports `dump`, `xml`, and `genkvs`. The synthetic corpus covers
+  KVS topology, tail emission, false EBML magic in PCM, multiple clusters and
+  segments, tagless and filtered streams, gaps, `scaled_timestamps`, and
+  `unknown_elements`. Golden traces are replayed under all split patterns.
 
-**Not done — remaining roadmap:**
+Leaf decoding helpers and `ParseSimpleBlock` are convenience functionality in
+`parser`; they do not turn the core into a retained document model.
 
-1. **Nested unknown-size masters**: only a single level (the top-level
-   Segment) is supported as unknown-size; nesting is irrelevant for KVS, whose
-   Clusters are known-size, but is unsupported for general Matroska input.
-2. **CRC-32 validation**: `CRC-32` elements are currently skipped as opaque
-   binary leaves rather than verified against their parent's payload.
-3. **Broader Matroska coverage**: corrupt/garbage-byte recovery beyond what
-   the fuzz target exercises for panic-safety, and element types outside the
-   KVS fragment shape (`Segment`/`Info`/`Tracks`/`Tags`/`Cluster` and their
-   children) are not modeled.
+## Roadmap
 
-Previously tracked here and now done: leaf value decoding helpers
-(`DecodeUint`/`DecodeInt`/`DecodeFloat`/`DecodeString`/`ParseSimpleBlock`),
-the per-fragment assembly API (`go/fragment`), and the module path
-(`github.com/yacchi/ebml-reader`) — see the "Working" list above.
+1. Add conformance coverage for nested unknown-size masters and verify their
+   outward structural closure behavior.
+2. Add CRC-32 validation; CRC-32 and Void are currently opaque skippable leaves.
+3. Broaden Matroska value and element coverage beyond the KVS fragment shape.
+   The core remains terminal on structural corruption; recovery belongs to the
+   opt-in `ext/fragment` `WithResync` path, which acts on structural failures
+   only.
 
-## Build / test / regenerate
+## Build, fixtures, and documentation
 
-Run from the `go/` directory:
+Run commands from `go/`:
 
 ```bash
-go test ./...        # tiny fixture + all KVS fixtures across every split pattern
+go test ./...
 go vet ./...
-go run ./cmd/ebml-reader genkvs  # regenerate fixtures/kvs/*.ebml.hex + golden/kvs/*.jsonl + README.json
+go run ./cmd/ebml-reader genkvs
 ```
 
-## Conventions
-
-- **Commit messages are English too** (Conventional Commits). The English-only
-  rule at the top of this file covers git history, not just the tree — it
-  overrides any personal/global convention that defaults to another language.
-- **Fixtures** (`fixtures/**/*.ebml.hex`): commented hex — `#` lines describe the
-  layout; the body is whitespace-separated hex bytes.
-- **Golden** (`golden/**/*.jsonl`): one JSON object per cursor event —
-  `{step, op, offset, depth, id, size, kind, header_len}`.
-- **Split patterns** (`tests/split_patterns.json`): `one_byte` / `fibonacci` /
-  `random`. Every fixture must produce identical golden under all of them.
-- **Data safety (hard rule):** every fixture is **100% synthetic** — fake UUIDs,
-  counter/tone PCM, synthetic tokens. **Never** commit real capture data (real
-  ContactId / InstanceId / customer audio). This repo is OSS-destined; regenerate
-  synthetic data via `ebml-reader genkvs`, never derive fixtures from a real capture.
-
-## KVS / Matroska structure reference
-
-- Stream = concatenated **unknown-size** `Segment`s (one per KVS fragment).
-- Each Segment: `[Info?] Tracks Tags Cluster`. The `Cluster` is **known-size** and
-  holds a `Timestamp` + `SimpleBlock`s. A `SimpleBlock` = track-number VINT,
-  int16 relative timecode, flags byte, then PCM.
-- AWS metadata lives in `Tags` → `SimpleTag` (`TagName`/`TagString`):
-  `AWS_KINESISVIDEO_PRODUCER_TIMESTAMP`, `AWS_KINESISVIDEO_FRAGMENT_NUMBER`,
-  `AWS_KINESISVIDEO_CONTINUATION_TOKEN`, `ContactId`, `InstanceId`.
-- All element IDs used above are defined in `go/matroska/elements.go`; verify
-  any additions against the Matroska specification.
-
-## Scope note
-
-The intended division of labor on the consumer side is: a batch parser handles
-already-finite payloads (e.g. list-then-fetch APIs that return complete
-fragments), and **this streaming cursor handles only the continuous GetMedia-style
-byte stream**, where per-Cluster incremental emission is what removes the
-boundary-wait and end-of-stream tail. Keep that boundary in mind: this library
-does not need to be a general-purpose Matroska muxer/demuxer — it needs to stream
-the KVS fragment shape correctly and cheaply.
+Fixtures under `fixtures/**/*.ebml.hex` are commented hexadecimal and entirely
+synthetic. Golden files under `golden/**/*.jsonl` contain one JSON object per
+cursor operation. Split definitions are in `tests/split_patterns.json`.
+`spec/SPEC.md` is the normative portable contract; `README.md` documents the
+core first and then the optional Go extensions.

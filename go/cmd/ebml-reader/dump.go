@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/yacchi/ebml-reader/matroska"
+	"github.com/yacchi/ebml-reader/parser"
 )
 
 type dumpOptions struct {
@@ -14,52 +15,77 @@ type dumpOptions struct {
 	hex       bool
 }
 
-// dumpVisitor prints a human-readable indented element tree.
-type dumpVisitor struct {
+type dumpHandler struct {
 	out       io.Writer
 	maxBinary int
 }
 
-func (d *dumpVisitor) header(e element) string {
-	details := fmt.Sprintf("offset %d, size %s", e.offset, sizeText(e.size))
-	if e.typ != matroska.TypeMaster {
-		details = fmt.Sprintf("type %s, %s", e.typ.String(), details)
+func (d dumpHandler) header(n parser.Node) string {
+	typ, known := matroska.TypeFor(n.ID)
+	if !known {
+		typ = matroska.TypeUnknown
 	}
 	return fmt.Sprintf("%s%s [%s]",
-		strings.Repeat("  ", e.depth), matroska.Describe(e.id), details)
+		strings.Repeat("  ", n.Depth),
+		matroska.Describe(n.ID),
+		dumpDetails(n, typ))
 }
 
-func (d *dumpVisitor) startMaster(e element) {
-	fmt.Fprintln(d.out, d.header(e))
+func dumpDetails(n parser.Node, typ matroska.ValueType) string {
+	details := fmt.Sprintf("offset %d, size %s", n.Offset, sizeText(n.Size))
+	if typ != matroska.TypeMaster {
+		details = fmt.Sprintf("type %s, %s", typ.String(), details)
+	}
+	return details
 }
 
-func (d *dumpVisitor) endMaster() {}
+func (d dumpHandler) Master(n parser.Node) (parser.Action, error) {
+	fmt.Fprintln(d.out, d.header(n))
+	return parser.Descend, nil
+}
 
-func (d *dumpVisitor) leaf(e element, payload []byte) {
-	line := d.header(e)
+func (d dumpHandler) Leaf(n parser.Node) (parser.Action, error) {
+	typ, known := matroska.TypeFor(n.ID)
+	if d.maxBinary <= 0 && (!known || typ == matroska.TypeBinary || typ == matroska.TypeBlock) {
+		fmt.Fprintf(d.out, "%s = binary %s bytes\n", d.header(n), sizeText(n.Size))
+		return parser.SkipPayload, nil
+	}
+	return parser.ReadPayload, nil
+}
+
+func (d dumpHandler) Payload(n parser.Node, payload []byte) error {
+	typ, known := matroska.TypeFor(n.ID)
+	line := d.header(n)
 	switch {
-	case e.typ == matroska.TypeBlock:
+	case typ == matroska.TypeBlock:
 		if s, ok := blockSummary(payload); ok {
 			fmt.Fprintf(d.out, "%s = %s\n", line, s)
-			return
+			return nil
 		}
 		fmt.Fprintf(d.out, "%s = %s\n", line, d.binaryValue(payload))
-	case e.typ == matroska.TypeBinary || !e.known:
+	case typ == matroska.TypeBinary || !known:
 		fmt.Fprintf(d.out, "%s = %s\n", line, d.binaryValue(payload))
 	default:
-		if s, ok := scalarValue(e, payload); ok {
-			if e.typ == matroska.TypeString || e.typ == matroska.TypeUTF8 {
+		if s, ok := scalarValue(n.ID, payload); ok {
+			if typ == matroska.TypeString || typ == matroska.TypeUTF8 {
 				fmt.Fprintf(d.out, "%s = %q\n", line, s)
 			} else {
 				fmt.Fprintf(d.out, "%s = %s\n", line, s)
 			}
-			return
+			return nil
 		}
 		fmt.Fprintf(d.out, "%s = %s\n", line, d.binaryValue(payload))
 	}
+	return nil
 }
 
-func (d *dumpVisitor) binaryValue(payload []byte) string {
+func (d dumpHandler) Close(parser.Node) error { return nil }
+
+func (d dumpHandler) Boundary(open, next parser.Node) bool {
+	return next.ID == matroska.IDEBML || next.ID == matroska.IDSegment
+}
+
+func (d dumpHandler) binaryValue(payload []byte) string {
 	text, truncated := hexBytes(payload, d.maxBinary)
 	if text == "" {
 		return fmt.Sprintf("binary %d bytes", len(payload))
@@ -75,8 +101,8 @@ func runDump(in io.Reader, out io.Writer, opt dumpOptions) error {
 	if err != nil {
 		return err
 	}
-	v := &dumpVisitor{out: out, maxBinary: opt.maxBinary}
-	return walk(src, v)
+	v := dumpHandler{out: out, maxBinary: opt.maxBinary}
+	return scan(src, v)
 }
 
 func dumpCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int {

@@ -6,12 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yacchi/ebml-reader/ext/tree"
 	"github.com/yacchi/ebml-reader/matroska"
 	"github.com/yacchi/ebml-reader/parser"
 )
-
-// ebmlEpoch is the EBML date origin: 2001-01-01T00:00:00 UTC.
-var ebmlEpoch = time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // hexBytes renders up to maxBinary bytes of b as space-free lowercase hex. When
 // maxBinary is 0 no bytes are shown. truncated reports whether bytes were cut.
@@ -30,34 +28,35 @@ func hexBytes(b []byte, maxBinary int) (text string, truncated bool) {
 // scalarValue decodes a registry scalar leaf to its textual representation.
 // Binary, block and unknown types return ("", false); callers render those
 // specially. Decode failures fall back to a binary rendering by returning false.
-func scalarValue(e element, payload []byte) (string, bool) {
-	switch e.typ {
+func scalarValue(id parser.ElementID, payload []byte) (string, bool) {
+	e := &tree.Element{ID: id, Payload: payload}
+	switch e.Type() {
 	case matroska.TypeUint:
-		v, err := parser.DecodeUint(payload)
+		v, err := e.AsUint()
 		if err != nil {
 			return "", false
 		}
 		return fmt.Sprintf("%d", v), true
 	case matroska.TypeInt:
-		v, err := parser.DecodeInt(payload)
+		v, err := e.AsInt()
 		if err != nil {
 			return "", false
 		}
 		return fmt.Sprintf("%d", v), true
 	case matroska.TypeFloat:
-		v, err := parser.DecodeFloat(payload)
+		v, err := e.AsFloat()
 		if err != nil {
 			return "", false
 		}
 		return fmt.Sprintf("%g", v), true
 	case matroska.TypeString, matroska.TypeUTF8:
-		return parser.DecodeString(payload), true
+		return e.AsString(), true
 	case matroska.TypeDate:
-		v, err := parser.DecodeInt(payload)
+		v, err := e.AsTime()
 		if err != nil {
 			return "", false
 		}
-		return ebmlEpoch.Add(time.Duration(v)).Format(time.RFC3339Nano), true
+		return v.Format(time.RFC3339Nano), true
 	default:
 		return "", false
 	}

@@ -47,7 +47,7 @@ type frame struct {
 // the ordered event log plus the number of NeedMoreData occurrences. The event
 // log is split-invariant: identical for any chunking of the same stream.
 func Trace(chunks [][]byte, classifier parser.KindClassifier) ([]Event, int, error) {
-	p := parser.New(parser.WithKindClassifier(classifier))
+	p := parser.New(classifier)
 
 	var events []Event
 	var mstack []frame

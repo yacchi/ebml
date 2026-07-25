@@ -48,7 +48,7 @@ func loadFuzzHex(path string) ([]byte, error) {
 }
 
 func driveParser(data []byte, byteByByte bool) {
-	p := New(WithKindClassifier(testKindClassifier))
+	p := New(testKindClassifier)
 	drain := func() {
 		for {
 			if p.current != nil {
@@ -137,7 +137,7 @@ func TestVINTLengthLimits(t *testing.T) {
 // as a caller relying on errors.Is would observe it.
 func TestHostileSizeVINTViaPeek(t *testing.T) {
 	data := []byte{0xa3, 0x00, 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
-	p := New(WithKindClassifier(testKindClassifier))
+	p := New(testKindClassifier)
 	p.Feed(data)
 
 	_, err := p.Peek()

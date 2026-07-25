@@ -14,7 +14,7 @@
 //   - AWS_KINESISVIDEO_PRODUCER_TIMESTAMP, parsed inline into a time.Time
 //   - ContactId (when present)
 //   - the track list
-//   - the Cluster timestamp
+//   - the Cluster timestamp and the fragment's first block time
 //   - per-track decoded PCM byte counts
 //
 // The library exposes AWS tags only through the generic Fragment.Tag accessor;
@@ -35,13 +35,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yacchi/ebml-reader/fragment"
+	"github.com/yacchi/ebml-reader/ext/fragment"
+	"github.com/yacchi/ebml-reader/matroska"
 )
 
 // Well-known AWS KVS tag names carried in each fragment's Tags element. They are
 // ordinary SimpleTag entries, read through the library's generic Fragment.Tag.
 const (
 	tagFragmentNumber    = "AWS_KINESISVIDEO_FRAGMENT_NUMBER"
+	tagContinuationToken = "AWS_KINESISVIDEO_CONTINUATION_TOKEN"
 	tagProducerTimestamp = "AWS_KINESISVIDEO_PRODUCER_TIMESTAMP"
 	tagContactID         = "ContactId"
 )
@@ -76,11 +78,17 @@ func run(r io.Reader, w io.Writer) error {
 	a := fragment.New()
 	buf := make([]byte, 4096)
 	n := 0
+	var previousTags map[string]string
+	var previousUUID string
 
 	report := func(frags []*fragment.Fragment) {
 		for _, f := range frags {
 			n++
-			printFragment(w, n, f)
+			tags, uuid := effectiveTags(f, previousTags, previousUUID)
+			printFragment(w, n, f, tags)
+			if len(tags) > 0 {
+				previousTags, previousUUID = tags, uuid
+			}
 		}
 	}
 
@@ -114,17 +122,42 @@ func run(r io.Reader, w io.Writer) error {
 }
 
 // printFragment renders one assembled fragment.
-func printFragment(w io.Writer, index int, f *fragment.Fragment) {
+func effectiveTags(f *fragment.Fragment, previous map[string]string, previousUUID string) (map[string]string, string) {
+	tags := f.Tags()
+	uuid := ""
+	if value := f.Value(matroska.IDSegmentUUID); value != nil {
+		uuid = fmt.Sprintf("%x", value.Bytes())
+	}
+	if len(tags) == 0 && uuid != "" && uuid == previousUUID {
+		// KVS consumers may inherit tagless metadata; this policy belongs here,
+		// not in the generic fragment assembler.
+		tags = previous
+	}
+	return tags, uuid
+}
+
+func tag(f *fragment.Fragment, tags map[string]string, name string) (string, bool) {
+	if value, ok := f.Tag(name); ok {
+		return value, true
+	}
+	value, ok := tags[name]
+	return value, ok
+}
+
+func printFragment(w io.Writer, index int, f *fragment.Fragment, tags map[string]string) {
 	fmt.Fprintf(w, "fragment %d\n", index)
 
-	if fn, ok := f.Tag(tagFragmentNumber); ok {
+	if fn, ok := tag(f, tags, tagFragmentNumber); ok {
 		fmt.Fprintf(w, "  fragment_number:   %s\n", fn)
+	}
+	if token, ok := tag(f, tags, tagContinuationToken); ok {
+		fmt.Fprintf(w, "  continuation_token: %s\n", token)
 	}
 
 	// The producer timestamp is a decimal seconds-since-epoch string (e.g.
 	// "1700000000.512"). Parsing it into a time.Time is the consumer's
 	// responsibility; parseProducerTimestamp below shows how.
-	if ts, ok := f.Tag(tagProducerTimestamp); ok {
+	if ts, ok := tag(f, tags, tagProducerTimestamp); ok {
 		if t, perr := parseProducerTimestamp(ts); perr == nil {
 			fmt.Fprintf(w, "  producer_time:     %s (raw %s)\n", t.UTC().Format(time.RFC3339Nano), ts)
 		} else {
@@ -132,18 +165,44 @@ func printFragment(w io.Writer, index int, f *fragment.Fragment) {
 		}
 	}
 
-	if cid, ok := f.Tag(tagContactID); ok {
+	if cid, ok := tag(f, tags, tagContactID); ok {
 		fmt.Fprintf(w, "  contact_id:        %s\n", cid)
 	}
 
-	fmt.Fprintf(w, "  cluster_timestamp: %d\n", f.ClusterTimestamp)
+	if value := f.Value(matroska.IDSegmentUUID); value != nil {
+		fmt.Fprintf(w, "  segment_uuid:      %x\n", value.Bytes())
+	}
+	fmt.Fprintf(w, "  cluster_timestamp: %d (scale %d ns)\n", f.ClusterTimestamp(), f.TimestampScale())
+	fmt.Fprintf(w, "  timestamp_scale:   %d ns\n", f.TimestampScale())
+	fmt.Fprintf(w, "  start_time:        %s\n", f.StartTime())
+	fmt.Fprintf(w, "  end_time:          %s\n", f.EndTime())
 
-	if len(f.Tracks) == 0 {
+	tracks := f.Tracks()
+	if len(tracks) == 0 {
 		fmt.Fprintln(w, "  tracks:            (none)")
 	}
-	for _, tr := range f.Tracks {
-		fmt.Fprintf(w, "  track %d:           type=%d codec=%s pcm_bytes=%d\n",
-			tr.Number, tr.Type, tr.CodecID, len(f.TrackPCM(tr.Number)))
+	for _, tr := range tracks {
+		number, err := tr.Find(matroska.IDTrackNumber).AsUint()
+		if err != nil {
+			continue
+		}
+		trackType, _ := tr.Find(matroska.IDTrackType).AsUint()
+		audio := tr.Find(matroska.IDAudio)
+		audioParams := ""
+		if audio.Exists() {
+			if v, err := audio.Find(matroska.IDSamplingFrequency).AsFloat(); err == nil {
+				audioParams += fmt.Sprintf(" sampling_frequency=%g", v)
+			}
+			if v, err := audio.Find(matroska.IDChannels).AsUint(); err == nil {
+				audioParams += fmt.Sprintf(" channels=%d", v)
+			}
+			if v, err := audio.Find(matroska.IDBitDepth).AsUint(); err == nil {
+				audioParams += fmt.Sprintf(" bit_depth=%d", v)
+			}
+		}
+		fmt.Fprintf(w, "  track %d %s: type=%d codec=%s%s pcm_bytes=%d\n",
+			number, tr.Find(matroska.IDName).AsString(), trackType,
+			tr.Find(matroska.IDCodecID).AsString(), audioParams, len(f.TrackPCM(number)))
 	}
 }
 

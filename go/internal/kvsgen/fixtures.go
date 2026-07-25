@@ -44,6 +44,107 @@ func BuildAll() []Fixture {
 		gap(),
 		falseEBMLMagicInPCM(),
 		tailLastFragment(),
+		scaledTimestamps(),
+		unknownElements(),
+	}
+}
+
+// scaledTimestamps is the fixture that makes timestamp scaling observable: its
+// Info declares a TimestampScale of 100_000 ns instead of the 1_000_000 default,
+// and its single known-size Cluster carries a non-zero Timestamp plus a
+// SimpleBlock whose relative timecode is NEGATIVE, which is legal and places that
+// block before its Cluster's timestamp. A consumer that forgets the scale, or
+// that reads the relative timecode as unsigned, cannot reproduce these times.
+func scaledTimestamps() Fixture {
+	const scale = 100000
+	data := concat(
+		ebmlHeader(),
+		elemUnknown(matroska.IDSegment, concat(
+			infoElement(segmentUID(0xA0), scale),
+			tracksElement(false),
+			tagsElement("8000000000.000", "scaled-0", fakeContactA),
+			clusterElement(1000,
+				simpleBlock(-20, pcm(24, 0x11)),
+				simpleBlock(0, pcm(24, 0x12)),
+				simpleBlock(20, pcm(24, 0x13)),
+			),
+		)),
+	)
+	return Fixture{
+		Name: "scaled_timestamps",
+		Comment: joinLines(
+			"scaled_timestamps: ONE fragment whose Info declares TimestampScale=100000 ns",
+			"(NOT the 1000000 default) together with a synthetic SegmentUUID. Its known-size",
+			"Cluster has Timestamp=1000 and three SimpleBlocks with relative timecodes",
+			"-20, 0 and +20: the first is NEGATIVE, so its absolute time precedes the",
+			"Cluster timestamp. Absolute block time is (cluster_timestamp +",
+			"relative_timecode) * TimestampScale, both operands being in scale units.",
+		),
+		Data: data,
+		Facts: Facts{
+			Description:        "Non-default TimestampScale and a negative relative block timecode.",
+			Fragments:          1,
+			Segments:           1,
+			Clusters:           1,
+			SimpleBlocks:       3,
+			EBMLHeaders:        1,
+			UnknownSizeSegment: true,
+			KnownSizeCluster:   true,
+			ContactIDs:         []string{fakeContactA},
+			ProducerTimestamps: []string{"8000000000.000"},
+			FragmentNumbers:    []string{"scaled-0"},
+			Notes:              "TimestampScale=100000; block timecodes -20/0/+20 around Cluster Timestamp 1000.",
+		},
+	}
+}
+
+// unknownElements is the fixture that proves an element no registry knows costs
+// nothing: the Segment carries an unregistered LEAF (0xEE, a decodable uint) and
+// an unregistered MASTER-shaped element (0x4FFF) holding two ordinary child
+// leaves. With the standard registry the cursor reads 0x4FFF as one opaque binary
+// leaf whose bytes stay complete; registering it as a master is what makes those
+// children nest as elements of their own.
+func unknownElements() Fixture {
+	data := concat(
+		ebmlHeader(),
+		elemUnknown(matroska.IDSegment, concat(
+			infoElement(segmentUID(0xB0), defaultTimestampScale),
+			elem(idUnregisteredLeaf, encodeUint(42)),
+			elem(idUnregisteredMaster, concat(
+				elem(matroska.IDName, []byte("vendor-box")),
+				elem(matroska.IDTrackNumber, encodeUint(7)),
+			)),
+			tracksElement(false),
+			tagsElement("9000000000.000", "unknown-0", fakeContactA),
+			clusterElement(0, simpleBlock(0, pcm(24, 0x21))),
+		)),
+	)
+	return Fixture{
+		Name: "unknown_elements",
+		Comment: joinLines(
+			"unknown_elements: ONE fragment whose Segment carries two elements no registry",
+			"knows: the LEAF 0xEE (payload 0x2A = 42, a decodable uint) and the",
+			"MASTER-SHAPED 0x4FFF holding Name=\"vendor-box\" and TrackNumber=7.",
+			"With the standard RFC 9559 registry both classify as binary leaves: the reader",
+			"honours their declared sizes, keeps their bytes complete, and reads every",
+			"element after them normally. Registering 0x4FFF as a master (or re-parsing its",
+			"payload) recovers the two children as elements.",
+		),
+		Data: data,
+		Facts: Facts{
+			Description:        "Segment carrying an unregistered leaf and an unregistered master-shaped element.",
+			Fragments:          1,
+			Segments:           1,
+			Clusters:           1,
+			SimpleBlocks:       1,
+			EBMLHeaders:        1,
+			UnknownSizeSegment: true,
+			KnownSizeCluster:   true,
+			ContactIDs:         []string{fakeContactA},
+			ProducerTimestamps: []string{"9000000000.000"},
+			FragmentNumbers:    []string{"unknown-0"},
+			Notes:              "0xEE leaf and 0x4FFF master-shaped element are unregistered; the reader never breaks on them.",
+		},
 	}
 }
 
@@ -51,7 +152,8 @@ func multiCluster() Fixture {
 	data := concat(
 		ebmlHeader(),
 		elemUnknown(matroska.IDSegment, concat(
-			tracksElement(),
+			infoElement(segmentUID(0x20), defaultTimestampScale),
+			tracksElement(false),
 			tagsElement("1500000000.000", "multi-cluster", fakeContactA),
 			clusterElement(0,
 				simpleBlock(0, pcm(24, 0x61)),
@@ -67,7 +169,7 @@ func multiCluster() Fixture {
 		Name: "multi_cluster",
 		Comment: joinLines(
 			"multi_cluster: ONE EBML header + ONE unknown-size Segment containing",
-			"Tracks, Tags, and TWO known-size Clusters. Each Cluster has a Timestamp",
+			"Info, Tracks, Tags, and TWO known-size Clusters. Each Cluster has a Timestamp",
 			"and two SimpleBlocks. Both Cluster end_master events occur before the",
 			"Segment is closed by FinalizeEOF.",
 		),
@@ -95,6 +197,8 @@ func topologyBasic() Fixture {
 		fragmentNumber: "91343852333181000000000000000000000000000000001",
 		contactID:      fakeContactA,
 		includeInfo:    true,
+		audioParams:    true,
+		uidSeed:        0x10,
 		clusterTS:      0,
 		blocks: [][]byte{
 			simpleBlock(0, pcm(32, 0x01)),
@@ -140,6 +244,7 @@ func multiSegment() Fixture {
 			fragmentNumber: fmt.Sprintf("9134385233318100000000000000000000000000000000%d", i+1),
 			contactID:      fakeContactA,
 			includeInfo:    i == 0,
+			uidSeed:        0x30,
 			clusterTS:      uint64(i) * 1024,
 			blocks: [][]byte{
 				simpleBlock(0, pcm(32, byte(0x10+i))),
@@ -178,7 +283,7 @@ func taglessSingle() Fixture {
 	// fragment 0: normal; fragment 1: NO Tags element at all; fragment 2: normal.
 	data = append(data, fragment(fragOpts{
 		producerTS: "2000000000.000", fragmentNumber: "tag-0", contactID: fakeContactA,
-		includeInfo: true, clusterTS: 0,
+		includeInfo: true, uidSeed: 0x40, clusterTS: 0,
 		blocks: [][]byte{simpleBlock(0, pcm(24, 0x01))},
 	})...)
 	data = append(data, fragment(fragOpts{
@@ -220,14 +325,16 @@ func taglessConsecutive() Fixture {
 	// fragment 0: normal; fragments 1 and 2: tagless; fragment 3: normal.
 	data = append(data, fragment(fragOpts{
 		producerTS: "3000000000.000", fragmentNumber: "c-0", contactID: fakeContactA,
-		includeInfo: true, clusterTS: 0, blocks: [][]byte{simpleBlock(0, pcm(24, 0x01))},
+		includeInfo: true, uidSeed: 0x50, clusterTS: 0, blocks: [][]byte{simpleBlock(0, pcm(24, 0x01))},
 	})...)
 	data = append(data, fragment(fragOpts{
 		producerTS: "3000000001.024", fragmentNumber: "c-1", omitTags: true,
+		includeInfo: true, uidSeed: 0x50,
 		clusterTS: 1024, blocks: [][]byte{simpleBlock(0, pcm(24, 0x02))},
 	})...)
 	data = append(data, fragment(fragOpts{
 		producerTS: "3000000002.048", fragmentNumber: "c-2", omitTags: true,
+		includeInfo: true, uidSeed: 0x50,
 		clusterTS: 2048, blocks: [][]byte{simpleBlock(0, pcm(24, 0x03))},
 	})...)
 	data = append(data, fragment(fragOpts{
@@ -266,7 +373,7 @@ func filterMismatch() Fixture {
 	for i := 0; i < 4; i++ {
 		data = append(data, fragment(fragOpts{
 			producerTS: tss[i], fragmentNumber: fmt.Sprintf("fm-%d", i), contactID: ids[i],
-			includeInfo: i == 0, clusterTS: uint64(i) * 1024,
+			includeInfo: i == 0, uidSeed: 0x60, clusterTS: uint64(i) * 1024,
 			blocks: [][]byte{simpleBlock(0, pcm(24, byte(0x30+i)))},
 		})...)
 	}
@@ -311,7 +418,7 @@ func gap() Fixture {
 	for i, s := range specs {
 		data = append(data, fragment(fragOpts{
 			producerTS: s.ts, fragmentNumber: s.fn, contactID: fakeContactA,
-			includeInfo: i == 0, clusterTS: s.tc,
+			includeInfo: i == 0, uidSeed: 0x70, clusterTS: s.tc,
 			blocks: [][]byte{simpleBlock(0, pcm(24, byte(0x50+i)))},
 		})...)
 	}
@@ -345,7 +452,7 @@ func falseEBMLMagicInPCM() Fixture {
 	magicPCM := pcmWithEBMLMagic(48)
 	data := fragment(fragOpts{
 		producerTS: "6000000000.000", fragmentNumber: "magic-0", contactID: fakeContactA,
-		includeInfo: true, clusterTS: 0,
+		includeInfo: true, uidSeed: 0x80, clusterTS: 0,
 		blocks: [][]byte{
 			simpleBlock(0, pcm(24, 0x01)),
 			simpleBlock(10, magicPCM), // contains the EBML magic bytes
@@ -386,7 +493,7 @@ func tailLastFragment() Fixture {
 	// is observable via end_master before any EOF; the Segment closes at EOF only.
 	data = append(data, fragment(fragOpts{
 		producerTS: "7000000000.000", fragmentNumber: "tail-0", contactID: fakeContactA,
-		includeInfo: true, clusterTS: 0, blocks: [][]byte{simpleBlock(0, pcm(24, 0x01))},
+		includeInfo: true, uidSeed: 0x90, clusterTS: 0, blocks: [][]byte{simpleBlock(0, pcm(24, 0x01))},
 	})...)
 	data = append(data, fragment(fragOpts{
 		producerTS: "7000000001.024", fragmentNumber: "tail-1", contactID: fakeContactA,

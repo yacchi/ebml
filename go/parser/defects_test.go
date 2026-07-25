@@ -6,7 +6,7 @@ import (
 )
 
 func TestFinalizeEOFRejectsTruncatedHeader(t *testing.T) {
-	p := New()
+	p := New(testKindClassifier)
 	p.Feed([]byte{0x1a})
 	_, err := p.FinalizeEOF()
 	if !errors.Is(err, ErrTruncated) {
@@ -19,7 +19,7 @@ func TestFinalizeEOFRejectsTruncatedHeader(t *testing.T) {
 }
 
 func TestFinalizeEOFRejectsTruncatedLeafPayload(t *testing.T) {
-	p := New()
+	p := New(testKindClassifier)
 	p.Feed([]byte{0xec, 0x82, 0x01})
 	if _, err := p.ConsumeHeader(); err != nil {
 		t.Fatalf("ConsumeHeader() error = %v", err)
@@ -30,7 +30,7 @@ func TestFinalizeEOFRejectsTruncatedLeafPayload(t *testing.T) {
 }
 
 func TestFinalizeEOFCleanFixture(t *testing.T) {
-	p := New()
+	p := New(testKindClassifier)
 	p.Feed(loadHexFixture(t, "fixtures/tiny.ebml.hex"))
 	var events []logEvent
 	step, needMore := 0, 0
@@ -84,7 +84,7 @@ func TestKnownSizeChildOverflowIsSplitInvariant(t *testing.T) {
 			name = "one_byte"
 		}
 		t.Run(name, func(t *testing.T) {
-			p := New(WithKindClassifier(testKindClassifier))
+			p := New(testKindClassifier)
 			var err error
 			if split {
 				for _, b := range data {
@@ -105,6 +105,58 @@ func TestKnownSizeChildOverflowIsSplitInvariant(t *testing.T) {
 				t.Fatalf("error = %v, want ErrElementOverflowsParent", err)
 			}
 		})
+	}
+}
+
+// TestUnknownSizeLeafIsTyped pins the diagnosis of the one input EBML forbids
+// outright: an unknown size on an element the classifier does not treat as a
+// master. It is reported on the header, by Peek, with the ID and the absolute
+// offset, so a consumer can detect exactly this case -- typically an
+// unregistered vendor master -- instead of reading a generic message.
+func TestUnknownSizeLeafIsTyped(t *testing.T) {
+	p := New(testKindClassifier)
+	// A Void leaf with a known (empty) payload, then a Void leaf declaring
+	// unknown size at offset 2.
+	p.Feed([]byte{0xec, 0x80, 0xec, 0xff})
+	if _, err := p.ConsumeHeader(); err != nil {
+		t.Fatalf("ConsumeHeader() error = %v", err)
+	}
+	if err := p.SkipPayload(); err != nil {
+		t.Fatalf("SkipPayload() error = %v", err)
+	}
+
+	_, err := p.Peek()
+	if !errors.Is(err, ErrUnknownSizeLeaf) {
+		t.Fatalf("Peek() error = %v, want ErrUnknownSizeLeaf", err)
+	}
+	var bad UnknownSizeLeafError
+	if !errors.As(err, &bad) {
+		t.Fatalf("Peek() error = %T, want UnknownSizeLeafError", err)
+	}
+	if bad.ID != 0xEC || bad.Offset != 2 || bad.Kind != KindBinary {
+		t.Errorf("error = %+v, want ID 0xEC at offset 2 classified as binary", bad)
+	}
+	if bad.Error() == "" {
+		t.Error("UnknownSizeLeafError.Error() is empty")
+	}
+	// The cursor never accepted the element, so no payload operation can run on
+	// it and the diagnosis is stable while the stream stays where it is.
+	if _, err := p.ConsumeHeader(); !errors.Is(err, ErrUnknownSizeLeaf) {
+		t.Errorf("ConsumeHeader() error = %v, want ErrUnknownSizeLeaf", err)
+	}
+}
+
+// TestUnknownSizeMasterIsAccepted is the counterpart: the unknown size is
+// legitimate for a master, which is how a KVS Segment is read.
+func TestUnknownSizeMasterIsAccepted(t *testing.T) {
+	p := New(testKindClassifier)
+	p.Feed([]byte{0x18, 0x53, 0x80, 0x67, 0xff})
+	h, err := p.Peek()
+	if err != nil {
+		t.Fatalf("Peek() error = %v", err)
+	}
+	if h.Kind != KindMaster || h.Size != UnknownSize {
+		t.Fatalf("Peek() = %v, want an unknown-size master", h)
 	}
 }
 

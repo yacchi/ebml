@@ -2,7 +2,6 @@ package matroska
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/yacchi/ebml-reader/parser"
 )
@@ -24,6 +23,12 @@ const (
 	// of binary payloads whose internal structure this library can decode via
 	// parser.ParseSimpleBlock.
 	TypeBlock
+	// TypeUnknown is never stored in the registry: it is what Element.Type
+	// reports for an element ID the registry does not know, so callers can tell
+	// "this library has no type information for this ID" apart from a genuine
+	// TypeMaster (which is the zero ValueType) or TypeBinary entry. Elements with
+	// an unknown ID are still fully readable through the Element accessors.
+	TypeUnknown
 )
 
 func (t ValueType) String() string {
@@ -46,6 +51,8 @@ func (t ValueType) String() string {
 		return "binary"
 	case TypeBlock:
 		return "block"
+	case TypeUnknown:
+		return "unknown"
 	default:
 		return fmt.Sprintf("ValueType(%d)", t)
 	}
@@ -136,13 +143,17 @@ const (
 	IDFileDescription         parser.ElementID = 0x467E
 )
 
-// ElementInfo describes a registered EBML/Matroska element.
+// ElementInfo describes a registered EBML/Matroska element. It is also the entry
+// a consumer passes to Registry.Register to teach this library a vendor or
+// private element; Type TypeMaster is what makes the cursor descend into it.
 type ElementInfo struct {
 	ID   parser.ElementID
 	Name string
 	Type ValueType
 }
 
+// elements is the built-in RFC 9559 element table backing Default(). It is never
+// mutated after initialization: the registry that exposes it is immutable.
 var elements = map[parser.ElementID]ElementInfo{
 	IDEBML:                    {IDEBML, "EBML", TypeMaster},
 	IDEBMLVersion:             {IDEBMLVersion, "EBMLVersion", TypeUint},
@@ -232,6 +243,7 @@ var elements = map[parser.ElementID]ElementInfo{
 	IDFileDescription:    {IDFileDescription, "FileDescription", TypeUTF8},
 }
 
+// names is the reverse index of elements, keyed by the canonical RFC 9559 name.
 var names = func() map[string]parser.ElementID {
 	result := make(map[string]parser.ElementID, len(elements))
 	for id, info := range elements {
@@ -249,61 +261,4 @@ var legacyNames = map[string]parser.ElementID{
 	"FileMimeType":  IDFileMediaType, // RFC 9559 renamed FileMimeType to FileMediaType.
 	"Timecode":      IDTimestamp,     // RFC 9559 Section 11 renamed Timecode to Timestamp.
 	"TimecodeScale": IDTimestampScale,
-}
-
-// Lookup returns the registry entry for id.
-func Lookup(id parser.ElementID) (ElementInfo, bool) {
-	info, ok := elements[id]
-	return info, ok
-}
-
-// IDForName returns the registered ID for an exact element name.
-//
-// Primary names are the RFC 9559 ones, and they are matched first. Well-known
-// pre-RFC names (for example "SegmentUID" for SegmentUUID, or "FileMimeType"
-// for FileMediaType) are accepted as aliases via a fallback lookup, so callers
-// written against the older matroska.org names still resolve. Aliases resolve
-// to the same ID but are never returned as an element's name.
-func IDForName(name string) (parser.ElementID, bool) {
-	if id, ok := names[name]; ok {
-		return id, true
-	}
-	id, ok := legacyNames[name]
-	return id, ok
-}
-
-// Elements returns all registered elements sorted by ID.
-func Elements() []ElementInfo {
-	result := make([]ElementInfo, 0, len(elements))
-	for _, info := range elements {
-		result = append(result, info)
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
-	return result
-}
-
-// TypeFor returns the registered value type for id.
-func TypeFor(id parser.ElementID) (ValueType, bool) {
-	info, ok := Lookup(id)
-	if !ok {
-		return 0, false
-	}
-	return info.Type, true
-}
-
-// Describe returns the registered name and ID, or just the ID if unknown.
-func Describe(id parser.ElementID) string {
-	if name := NameForID(id); name != "" {
-		return fmt.Sprintf("%s (%s)", name, id)
-	}
-	return id.String()
-}
-
-// NameForID returns the registered name, or an empty string for an unknown ID.
-func NameForID(id parser.ElementID) string {
-	info, ok := Lookup(id)
-	if !ok {
-		return ""
-	}
-	return info.Name
 }

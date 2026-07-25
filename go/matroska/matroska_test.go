@@ -134,7 +134,7 @@ func TestParserSmoke(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p := parser.New(parser.WithKindClassifier(KindForElementID))
+	p := parser.New(KindForElementID)
 	p.Feed(raw)
 	for {
 		h, err := p.Peek()

@@ -51,10 +51,41 @@ func TestRunSmoke(t *testing.T) {
 		"fragment_number:   91343852333181000000000000000000000000000000001",
 		"contact_id:        00000000-0000-4000-8000-000000000001",
 		"cluster_timestamp: 0",
+		"sampling_frequency=8000 channels=1 bit_depth=16",
 		"pcm_bytes=96",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("report missing %q\n--- got ---\n%s", want, got)
+		}
+	}
+}
+
+func TestTaglessFragmentsInheritMatchingUUIDTags(t *testing.T) {
+	raw := loadFixture(t, "tagless_consecutive")
+	var out bytes.Buffer
+	if err := run(bytes.NewReader(raw), &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, fragment := range []string{"fragment 2", "fragment 3"} {
+		start := strings.Index(got, fragment)
+		if start < 0 {
+			t.Fatalf("missing %s", fragment)
+		}
+		end := strings.Index(got[start+len(fragment):], "fragment ")
+		if end < 0 {
+			end = len(got) - start - len(fragment)
+		}
+		part := got[start : start+len(fragment)+end]
+		for _, want := range []string{
+			"segment_uuid:",
+			"fragment_number:   c-0",
+			"contact_id:        00000000-0000-4000-8000-000000000001",
+			"producer_time:",
+		} {
+			if !strings.Contains(part, want) {
+				t.Errorf("%s missing %q:\n%s", fragment, want, part)
+			}
 		}
 	}
 }

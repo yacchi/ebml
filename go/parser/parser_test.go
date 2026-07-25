@@ -217,7 +217,7 @@ func TestTinyGoldenIsSplitInvariant(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			p := New(WithKindClassifier(testKindClassifier))
+			p := New(testKindClassifier)
 			var events []logEvent
 			step := 0
 			needMore := 0

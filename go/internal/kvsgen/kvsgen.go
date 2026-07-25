@@ -9,8 +9,8 @@
 //
 //	EBML (known-size header)
 //	Segment (UNKNOWN-size)
-//	  Info?      { TimestampScale }
-//	  Tracks     { TrackEntry { TrackNumber, TrackType, CodecID } }
+//	  Info?      { SegmentUUID, TimestampScale }
+//	  Tracks     { TrackEntry { TrackNumber, TrackType, CodecID, Name } x2 }
 //	  Tags?      { Tag { Targets, SimpleTag* (ProducerTimestamp, FragmentNumber,
 //	                     ContinuationToken, ContactId?, InstanceId) } }
 //	  Cluster (KNOWN-size) { Timestamp, SimpleBlock+ }
@@ -21,6 +21,9 @@
 package kvsgen
 
 import (
+	"encoding/binary"
+	"math"
+
 	"github.com/yacchi/ebml-reader/matroska"
 	"github.com/yacchi/ebml-reader/parser"
 )
@@ -33,6 +36,18 @@ const (
 	fakeInstance     = "00000000-0000-4000-8000-0000000000aa"
 	fakeContinuation = "0000000000000000000000000000000000000000000000000000000000000000"
 	fakeCodecID      = "A_PCM/INT/LIT"
+)
+
+// defaultTimestampScale is the Matroska default TimestampScale in nanoseconds.
+const defaultTimestampScale uint64 = 1000000
+
+// Element IDs no registry knows, used by the unknown_elements fixture: a
+// vendor-shaped leaf and a vendor-shaped master. Both are valid EBML IDs that the
+// RFC 9559 table does not define, so the standard classifier reads either as one
+// opaque binary leaf until a consumer registers them.
+const (
+	idUnregisteredLeaf   parser.ElementID = 0xEE
+	idUnregisteredMaster parser.ElementID = 0x4FFF
 )
 
 // ---- Low-level EBML encoders ----
@@ -76,6 +91,7 @@ func encodeUint(v uint64) []byte {
 	if v == 0 {
 		return []byte{0x00}
 	}
+
 	n := 0
 	for x := v; x > 0; x >>= 8 {
 		n++
@@ -85,6 +101,12 @@ func encodeUint(v uint64) []byte {
 		out[i] = byte(v)
 		v >>= 8
 	}
+	return out
+}
+
+func encodeFloat(v float64) []byte {
+	out := make([]byte, 8)
+	binary.BigEndian.PutUint64(out, math.Float64bits(v))
 	return out
 }
 
@@ -145,17 +167,53 @@ func ebmlHeader() []byte {
 	))
 }
 
-func infoElement() []byte {
-	return elem(matroska.IDInfo, elem(matroska.IDTimestampScale, encodeUint(1000000)))
+// segmentUID returns a DETERMINISTIC 16-byte synthetic Segment UID derived from
+// seed (never random, so fixtures stay reproducible and split-invariant). It is
+// fabricated, not derived from any real KVS capture.
+func segmentUID(seed byte) []byte {
+	out := make([]byte, 16)
+	for i := range out {
+		out[i] = seed + byte(i)
+	}
+	return out
 }
 
-func tracksElement() []byte {
-	trackEntry := elem(matroska.IDTrackEntry, concat(
-		elem(matroska.IDTrackNumber, encodeUint(1)),
+// infoElement builds a Segment Info element carrying a synthetic SegmentUUID and
+// the given TimestampScale in nanoseconds (defaultTimestampScale is the Matroska
+// default; a different value makes a fixture exercise the scaling path).
+func infoElement(uid []byte, timestampScale uint64) []byte {
+	return elem(matroska.IDInfo, concat(
+		elem(matroska.IDSegmentUUID, uid),
+		elem(matroska.IDTimestampScale, encodeUint(timestampScale)),
+	))
+}
+
+// trackEntry builds one audio TrackEntry with a Name and standard audio
+// parameters. The names
+// (AUDIO_FROM_CUSTOMER / AUDIO_TO_CUSTOMER) are generic Amazon Connect track-name
+// conventions — structural channel identifiers, not PII.
+func trackEntry(number uint64, name string, audioParams bool) []byte {
+	payload := concat(
+		elem(matroska.IDTrackNumber, encodeUint(number)),
 		elem(matroska.IDTrackType, encodeUint(2)), // 2 = audio
 		elem(matroska.IDCodecID, []byte(fakeCodecID)),
+		elem(matroska.IDName, []byte(name)),
+	)
+	if audioParams {
+		payload = append(payload, elem(matroska.IDAudio, concat(
+			elem(matroska.IDSamplingFrequency, encodeFloat(8000)),
+			elem(matroska.IDChannels, encodeUint(1)),
+			elem(matroska.IDBitDepth, encodeUint(16)),
+		))...)
+	}
+	return elem(matroska.IDTrackEntry, payload)
+}
+
+func tracksElement(audioParams bool) []byte {
+	return elem(matroska.IDTracks, concat(
+		trackEntry(1, "AUDIO_FROM_CUSTOMER", audioParams),
+		trackEntry(2, "AUDIO_TO_CUSTOMER", audioParams),
 	))
-	return elem(matroska.IDTracks, trackEntry)
 }
 
 // tagsElement builds a Tags element. If contactID is "" the ContactId SimpleTag
@@ -205,6 +263,9 @@ type fragOpts struct {
 	contactID      string // "" => no ContactId tag
 	omitTags       bool   // omit the entire Tags element
 	includeInfo    bool
+	uidSeed        byte   // seed for the synthetic SegmentUUID when includeInfo is set
+	timestampScale uint64 // 0 => defaultTimestampScale
+	audioParams    bool
 	clusterTS      uint64
 	blocks         [][]byte
 }
@@ -213,9 +274,13 @@ type fragOpts struct {
 func fragment(o fragOpts) []byte {
 	seg := []byte{}
 	if o.includeInfo {
-		seg = append(seg, infoElement()...)
+		scale := o.timestampScale
+		if scale == 0 {
+			scale = defaultTimestampScale
+		}
+		seg = append(seg, infoElement(segmentUID(o.uidSeed), scale)...)
 	}
-	seg = append(seg, tracksElement()...)
+	seg = append(seg, tracksElement(o.audioParams)...)
 	if !o.omitTags {
 		seg = append(seg, tagsElement(o.producerTS, o.fragmentNumber, o.contactID)...)
 	}

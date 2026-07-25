@@ -19,7 +19,7 @@
       "fragment_numbers": [
         "magic-0"
       ],
-      "bytes": 534,
+      "bytes": 618,
       "notes": "Proves size-driven parsing beats the byte-scan heuristic."
     },
     "filter_mismatch": {
@@ -49,7 +49,7 @@
         "fm-2",
         "fm-3"
       ],
-      "bytes": 1755,
+      "bytes": 2034,
       "notes": "Contact boundary is reader policy; structure is uniform."
     },
     "gap": {
@@ -74,7 +74,7 @@
         "gap-1",
         "gap-4"
       ],
-      "bytes": 1322,
+      "bytes": 1536,
       "notes": "Discontinuity visible in tags/timecodes, not in structure."
     },
     "multi_cluster": {
@@ -95,7 +95,7 @@
       "fragment_numbers": [
         "multi-cluster"
       ],
-      "bytes": 543,
+      "bytes": 639,
       "notes": "Both Clusters close structurally before the Segment closes at EOF."
     },
     "multi_segment": {
@@ -122,8 +122,29 @@
         "...003",
         "...004"
       ],
-      "bytes": 2111,
+      "bytes": 2390,
       "notes": "Segment boundaries detected via top-level EBML sibling, not magic scan."
+    },
+    "scaled_timestamps": {
+      "description": "Non-default TimestampScale and a negative relative block timecode.",
+      "fragments": 1,
+      "segments": 1,
+      "clusters": 1,
+      "simple_blocks": 3,
+      "ebml_headers": 1,
+      "unknown_size_segment": true,
+      "known_size_cluster": true,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "producer_timestamps": [
+        "8000000000.000"
+      ],
+      "fragment_numbers": [
+        "scaled-0"
+      ],
+      "bytes": 596,
+      "notes": "TimestampScale=100000; block timecodes -20/0/+20 around Cluster Timestamp 1000."
     },
     "tagless_consecutive": {
       "description": "4 fragments; two consecutive middle fragments are tagless.",
@@ -152,7 +173,7 @@
         "c-2",
         "c-3"
       ],
-      "bytes": 1087,
+      "bytes": 1428,
       "notes": "Two consecutive tagless fragments; cursor parses cleanly."
     },
     "tagless_single": {
@@ -179,7 +200,7 @@
         "tag-1",
         "tag-2"
       ],
-      "bytes": 988,
+      "bytes": 1202,
       "notes": "Middle fragment tagless; cursor still parses cleanly."
     },
     "tail_last_fragment": {
@@ -202,7 +223,7 @@
         "tail-0",
         "tail-1"
       ],
-      "bytes": 917,
+      "bytes": 1066,
       "notes": "Last Cluster emits via end_master; tail latency removed."
     },
     "topology_basic": {
@@ -223,8 +244,29 @@
       "fragment_numbers": [
         "91343852333181000000000000000000000000000000001"
       ],
-      "bytes": 574,
+      "bytes": 696,
       "notes": "Cluster closes via end_master; Segment closes only at EOF."
+    },
+    "unknown_elements": {
+      "description": "Segment carrying an unregistered leaf and an unregistered master-shaped element.",
+      "fragments": 1,
+      "segments": 1,
+      "clusters": 1,
+      "simple_blocks": 1,
+      "ebml_headers": 1,
+      "unknown_size_segment": true,
+      "known_size_cluster": true,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "producer_timestamps": [
+        "9000000000.000"
+      ],
+      "fragment_numbers": [
+        "unknown-0"
+      ],
+      "bytes": 558,
+      "notes": "0xEE leaf and 0x4FFF master-shaped element are unregistered; the reader never breaks on them."
     }
   },
   "generated_by": "go run ./cmd/ebml-reader genkvs",
