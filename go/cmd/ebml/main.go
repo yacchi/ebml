@@ -4,7 +4,6 @@
 //
 //	dump [flags] [FILE]   print a human-readable indented element tree
 //	xml  [flags] [FILE]   emit the element tree as well-formed XML
-//	genkvs [flags]        regenerate the synthetic KVS fixture corpus
 //
 // dump and xml read RAW EBML bytes from FILE ("-" or absent means stdin) and feed
 // them through the cursor incrementally, so a continuous KVS GetMedia stream of
@@ -28,7 +27,6 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  dump     print a human-readable indented EBML element tree")
 	fmt.Fprintln(w, "  xml      emit the EBML element tree as well-formed XML")
-	fmt.Fprintln(w, "  genkvs   regenerate the synthetic KVS fixture corpus")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Run 'ebml <command> -h' for command-specific flags.")
 }
@@ -47,8 +45,6 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return dumpCommand(args[1:], stdin, stdout, stderr)
 	case "xml":
 		return xmlCommand(args[1:], stdin, stdout, stderr)
-	case "genkvs":
-		return genkvsCommand(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
 		usage(stdout)
 		return 0

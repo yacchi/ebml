@@ -34,7 +34,7 @@ func discoverKVSFixtures(t *testing.T) []string {
 		t.Fatalf("glob fixtures/kvs: %v", err)
 	}
 	if len(paths) == 0 {
-		t.Fatal("no fixtures found under fixtures/kvs: run `go run ./cmd/ebml genkvs`")
+		t.Fatal("no fixtures found under fixtures/kvs: run `go run ./internal/kvsgen/genfixtures`")
 	}
 	names := make([]string, 0, len(paths))
 	for _, p := range paths {
@@ -101,11 +101,11 @@ func TestKVSCorpusMatchesGenerator(t *testing.T) {
 	}
 	for _, fx := range kvsgen.BuildAll() {
 		if !committed[fx.Name] {
-			t.Errorf("generator case %q has no committed fixture %s: run `go run ./cmd/ebml genkvs`",
+			t.Errorf("generator case %q has no committed fixture %s: run `go run ./internal/kvsgen/genfixtures`",
 				fx.Name, kvsFixturePath(fx.Name))
 		}
 		if _, err := os.Stat(kvsGoldenPath(fx.Name)); err != nil {
-			t.Errorf("generator case %q has no committed golden %s: run `go run ./cmd/ebml genkvs` (%v)",
+			t.Errorf("generator case %q has no committed golden %s: run `go run ./internal/kvsgen/genfixtures` (%v)",
 				fx.Name, kvsGoldenPath(fx.Name), err)
 		}
 	}

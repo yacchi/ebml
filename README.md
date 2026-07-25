@@ -349,7 +349,7 @@ Run from `go/`:
 ```bash
 go run ./cmd/ebml dump --hex ../fixtures/kvs/topology_basic.ebml.hex
 go run ./cmd/ebml xml --hex ../fixtures/kvs/topology_basic.ebml.hex
-go run ./cmd/ebml genkvs
+go run ./internal/kvsgen/genfixtures
 ```
 
 The dump is an indented structural view. A current sample from `topology_basic.ebml.hex` begins:
@@ -383,7 +383,7 @@ Run from `go/`:
 ```bash
 go test ./...
 go vet ./...
-go run ./cmd/ebml genkvs
+go run ./internal/kvsgen/genfixtures
 ```
 
 ## License

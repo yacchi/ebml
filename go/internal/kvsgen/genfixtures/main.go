@@ -1,3 +1,10 @@
+// Command genfixtures regenerates the repository's synthetic fixture corpus.
+//
+// It is an internal build tool, not part of the published CLI: it writes into
+// the repository tree (fixtures/kvs, golden/kvs) and is deliberately placed
+// under internal/ so it can be neither imported nor `go install`ed.
+//
+//	go run ./internal/kvsgen/genfixtures
 package main
 
 import (
@@ -37,7 +44,7 @@ func generateKVS(root string, log io.Writer) error {
 
 	fixtures := kvsgen.BuildAll()
 	manifest := map[string]any{
-		"generated_by": "go run ./cmd/ebml genkvs",
+		"generated_by": "go run ./internal/kvsgen/genfixtures",
 		"data_safety":  "100% synthetic: fake UUID ContactId/InstanceId, counter-pattern PCM, synthetic tokens. No real Amazon Connect capture data.",
 		"schema":       "each .ebml.hex is a synthetic MKV stream; each golden/kvs/<name>.jsonl is the cursor event log (KVS classifier) and is split-invariant.",
 		"fixtures":     map[string]kvsgen.Facts{},
@@ -103,21 +110,20 @@ func renderHex(f kvsgen.Fixture) string {
 	return b.String()
 }
 
-func genkvsCommand(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("genkvs", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+func main() {
+	fs := flag.NewFlagSet("genfixtures", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
 	root := fs.String("root", "..", "repository root (parent of fixtures/ and golden/)")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: ebml genkvs [flags]")
-		fmt.Fprintln(stderr, "  Regenerate fixtures/kvs, golden/kvs and README.json. Run from the go/ directory.")
+		fmt.Fprintln(os.Stderr, "Usage: go run ./internal/kvsgen/genfixtures [flags]")
+		fmt.Fprintln(os.Stderr, "  Regenerate fixtures/kvs, golden/kvs and README.json. Run from the go/ directory.")
 		fs.PrintDefaults()
 	}
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		os.Exit(2)
 	}
-	if err := generateKVS(*root, stdout); err != nil {
-		fmt.Fprintf(stderr, "ebml: %v\n", err)
-		return 1
+	if err := generateKVS(*root, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "genfixtures: %v\n", err)
+		os.Exit(1)
 	}
-	return 0
 }
