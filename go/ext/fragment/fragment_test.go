@@ -15,6 +15,7 @@ import (
 
 	"github.com/yacchi/ebml/ext/fragment"
 	"github.com/yacchi/ebml/ext/tree"
+	"github.com/yacchi/ebml/internal/ebmltest"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
 )
@@ -29,10 +30,12 @@ const (
 )
 
 // Element IDs the fixtures carry that no registry knows: unknown_elements plants
-// an unregistered leaf and an unregistered master-shaped element.
+// an unregistered leaf and an unregistered master-shaped element. They are
+// declared once in internal/ebmltest, not restated here, so this test and the
+// fixture generator can never drift onto different IDs.
 const (
-	idUnregisteredLeaf   parser.ElementID = 0xEE
-	idUnregisteredMaster parser.ElementID = 0x4FFF
+	idUnregisteredLeaf   = ebmltest.UnassignedLeafID
+	idUnregisteredMaster = ebmltest.UnassignedMasterID
 )
 
 // loadHex reads a fixtures/kvs/<name>.ebml.hex file, stripping comment lines
@@ -739,33 +742,33 @@ func TestLooseResultDisambiguatedByItsOwnPath(t *testing.T) {
 }
 
 // TestUnregisteredElementIsRetainedAndReadable checks retention has no allowlist:
-// the unregistered leaf 0xEE is retained like any other element and its payload
+// the unregistered leaf is retained like any other element and its payload
 // decodes, while the registry simply has no name for it.
 func TestUnregisteredElementIsRetainedAndReadable(t *testing.T) {
 	f := run(t, splitOneByte(loadHex(t, "unknown_elements"))).all()[0]
 
 	el := f.Value(idUnregisteredLeaf)
 	if el == nil {
-		t.Fatal("the unregistered leaf 0xEE was not retained")
+		t.Fatalf("the unregistered leaf %s was not retained", idUnregisteredLeaf)
 	}
 	if el.Parent() != f.Segment {
-		t.Fatalf("0xEE parent = %v, want the Segment root", el.Parent())
+		t.Fatalf("%s parent = %v, want the Segment root", idUnregisteredLeaf, el.Parent())
 	}
 	v, err := el.AsUint()
 	if err != nil {
 		t.Fatalf("AsUint: %v", err)
 	}
 	if v != 42 {
-		t.Fatalf("0xEE = %d, want 42", v)
+		t.Fatalf("%s = %d, want 42", idUnregisteredLeaf, v)
 	}
 	if got := el.Name(); got != "" {
 		t.Fatalf("Name() = %q, want \"\" for an unregistered ID", got)
 	}
-	if got := el.Describe(); got != "0xEE" {
+	if got := el.Describe(); got != idUnregisteredLeaf.String() {
 		t.Fatalf("Describe() = %q, want the bare hex ID", got)
 	}
 	if got, ok := matroska.TypeFor(el.ID); ok {
-		t.Fatalf("TypeFor(0xEE) = %v, %v; want unknown", got, ok)
+		t.Fatalf("TypeFor(%s) = %v, %v; want unknown", idUnregisteredLeaf, got, ok)
 	}
 
 	// Without a registry entry the master-shaped 0x4FFF is one opaque leaf whose

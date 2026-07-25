@@ -103,11 +103,16 @@ func scaledTimestamps() Fixture {
 }
 
 // unknownElements is the fixture that proves an element no registry knows costs
-// nothing: the Segment carries an unregistered LEAF (0xEE, a decodable uint) and
-// an unregistered MASTER-shaped element (0x4FFF) holding two ordinary child
+// nothing: the Segment carries an unregistered LEAF (0x4FFE, a decodable uint)
+// and an unregistered MASTER-shaped element (0x4FFF) holding two ordinary child
 // leaves. With the standard registry the cursor reads 0x4FFF as one opaque binary
 // leaf whose bytes stay complete; registering it as a master is what makes those
 // children nest as elements of their own.
+//
+// Both IDs come from internal/ebmltest and are checked against the published
+// schema, because this fixture's whole premise is that no registry can know
+// them: the leaf was 0xEE until the schema check showed that 0xEE is Matroska's
+// BlockAddID.
 func unknownElements() Fixture {
 	s := newStream()
 	s.ebmlHeader()
@@ -130,7 +135,7 @@ func unknownElements() Fixture {
 		Name: "unknown_elements",
 		Comment: joinLines(
 			"unknown_elements: ONE fragment whose Segment carries two elements no registry",
-			"knows: the LEAF 0xEE (payload 0x2A = 42, a decodable uint) and the",
+			"knows: the LEAF 0x4FFE (payload 0x2A = 42, a decodable uint) and the",
 			"MASTER-SHAPED 0x4FFF holding Name=\"vendor-box\" and TrackNumber=7.",
 			"With the standard RFC 9559 registry both classify as binary leaves: the reader",
 			"honours their declared sizes, keeps their bytes complete, and reads every",
@@ -150,7 +155,7 @@ func unknownElements() Fixture {
 			ContactIDs:         []string{fakeContactA},
 			ProducerTimestamps: []string{"9000000000.000"},
 			FragmentNumbers:    []string{"unknown-0"},
-			Notes:              "0xEE leaf and 0x4FFF master-shaped element are unregistered; the reader never breaks on them.",
+			Notes:              "0x4FFE leaf and 0x4FFF master-shaped element are unregistered; the reader never breaks on them.",
 		},
 	}
 }

@@ -17,3 +17,8 @@
 # Go
 /bin/
 dist/
+
+# Fetched-on-demand spec documents. The IETF CELLAR EBML Schemas are CC-BY-4.0
+# works and are never committed here; the conformance-check skill downloads
+# them into this cache when it needs them.
+/.spec-cache/

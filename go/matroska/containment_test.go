@@ -5,8 +5,15 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/yacchi/ebml/internal/ebmltest"
 	"github.com/yacchi/ebml/parser"
 )
+
+// idUnregistered is an ID this registry must never know. It comes from
+// internal/ebmltest rather than being picked here, because "surely nobody uses
+// this ID" is exactly the assumption that goes stale: these tests used 0xEE
+// until the schema check pointed out that 0xEE is Matroska's BlockAddID.
+const idUnregistered = ebmltest.UnassignedLeafID
 
 func TestLegalChildren(t *testing.T) {
 	segment, ok := LegalChildren(IDSegment)
@@ -51,10 +58,10 @@ func TestEndsUnknownSizeMaster(t *testing.T) {
 		{"SimpleBlock stays in Cluster", IDCluster, IDSimpleBlock, false},
 		{"Void stays in Cluster", IDCluster, IDVoid, false},
 		{"CRC-32 stays in Cluster", IDCluster, IDCRC32, false},
-		{"unregistered stays in Cluster", IDCluster, parser.ElementID(0xEE), false},
+		{"unregistered stays in Cluster", IDCluster, idUnregistered, false},
 		{"Cluster ends Cluster", IDCluster, IDCluster, true},
 		{"Cluster stays in Segment", IDSegment, IDCluster, false},
-		{"unknown open never ends", parser.ElementID(0xEE), IDTags, false},
+		{"unknown open never ends", idUnregistered, IDTags, false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -66,10 +73,10 @@ func TestEndsUnknownSizeMaster(t *testing.T) {
 	}
 
 	reg := NewRegistry(Default())
-	if err := reg.Register(ElementInfo{ID: parser.ElementID(0xEE), Name: "Vendor", Type: TypeBinary}); err != nil {
+	if err := reg.Register(ElementInfo{ID: idUnregistered, Name: "Vendor", Type: TypeBinary}); err != nil {
 		t.Fatalf("Register vendor: %v", err)
 	}
-	if reg.EndsUnknownSizeMaster(IDCluster, parser.ElementID(0xEE)) {
+	if reg.EndsUnknownSizeMaster(IDCluster, idUnregistered) {
 		t.Fatal("a vendor element must never be a containment boundary")
 	}
 }

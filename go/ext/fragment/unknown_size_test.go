@@ -7,7 +7,6 @@ import (
 	"github.com/yacchi/ebml/ext/fragment"
 	"github.com/yacchi/ebml/internal/ebmltest"
 	"github.com/yacchi/ebml/matroska"
-	"github.com/yacchi/ebml/parser"
 )
 
 func unknownSizeCluster(blocks ...ebmltest.Node) ebmltest.Node {
@@ -71,7 +70,7 @@ func TestUnregisteredElementDoesNotEndACluster(t *testing.T) {
 	raw := unknownClusterDocument(
 		unknownSizeCluster(
 			synSimpleBlock(1, 0, []byte{1}),
-			ebmltest.Uint(parser.ElementID(0xEE), 42),
+			ebmltest.Uint(ebmltest.UnassignedLeafID, 42),
 			synSimpleBlock(1, 1, []byte{2}),
 		),
 		synTags("next", "document"),

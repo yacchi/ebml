@@ -28,6 +28,7 @@ package kvsgen
 import (
 	"bytes"
 
+	"github.com/yacchi/ebml/internal/ebmltest"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
 	"github.com/yacchi/ebml/writer"
@@ -49,10 +50,13 @@ const defaultTimestampScale uint64 = 1000000
 // Element IDs no registry knows, used by the unknown_elements fixture: a
 // vendor-shaped leaf and a vendor-shaped master. Both are valid EBML IDs that the
 // RFC 9559 table does not define, so the standard classifier reads either as one
-// opaque binary leaf until a consumer registers them.
+// opaque binary leaf until a consumer registers them. They come from
+// internal/ebmltest, which is the single place this repository reserves
+// unassigned IDs, and internal/specconform checks them against the published
+// schema so this fixture's premise cannot quietly stop being true.
 const (
-	idUnregisteredLeaf   parser.ElementID = 0xEE
-	idUnregisteredMaster parser.ElementID = 0x4FFF
+	idUnregisteredLeaf   = ebmltest.UnassignedLeafID
+	idUnregisteredMaster = ebmltest.UnassignedMasterID
 )
 
 // ---- Stream construction ----

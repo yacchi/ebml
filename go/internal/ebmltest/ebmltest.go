@@ -32,6 +32,26 @@ import (
 	"github.com/yacchi/ebml/writer"
 )
 
+// Element IDs this repository reserves for test inputs that need an element NO
+// registry can know: an unregistered leaf and an unregistered master-shaped
+// element. They live here, in one place, because a test or fixture that picks
+// its own "surely nobody uses this" ID picks wrong sooner or later — the
+// unregistered leaf was 0xEE until the schema check pointed out that 0xEE is
+// Matroska's BlockAddID, so the fixture documenting an "element no registry
+// knows" was one registry extension away from documenting a lie.
+//
+// Both sit in the 0x4FFx range, which the Matroska schema leaves unassigned,
+// and internal/specconform verifies against the published schema that they
+// still are.
+const (
+	UnassignedLeafID   parser.ElementID = 0x4FFE
+	UnassignedMasterID parser.ElementID = 0x4FFF
+)
+
+// UnassignedIDs is every ID above, for the conformance check that proves they
+// are absent from the schema.
+var UnassignedIDs = []parser.ElementID{UnassignedLeafID, UnassignedMasterID}
+
 // Node is one element of a test input: a leaf with a value, or a master with
 // children. It is built by the constructors below and turned into bytes by Encode.
 type Node struct {

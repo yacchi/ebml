@@ -139,6 +139,26 @@ carries no meaning.
   consumer could not read. A corpus generated from an assumed shape validates
   the assumption, not the world. `known_size_cluster` is retained as the one
   deliberate counter-case: legal Matroska that KVS does not send.
+* The normative machine-readable schemas — `ebml.xml` (RFC 8794 header elements)
+  and `ebml_matroska.xml` (RFC 9559 body elements), published by the IETF CELLAR
+  working group — are CC-BY-4.0 works and are NEVER VENDORED here. They are a
+  development-time input: the `conformance-check` skill fetches them into the
+  gitignored `.spec-cache/` and `internal/specconform` checks the registry
+  against them. What CC-BY actually covers is the schema's PROSE, so no element
+  `<documentation>` text is ever copied into a Go doc comment; IDs, names, types
+  and paths are interoperability facts and are transcribed by hand.
+  `go/matroska/elements.go` stays HAND-WRITTEN and is never generated: its
+  omissions are deliberate and a generator would erase that intent. The checker
+  reads the registry through its EXPORTED API only, so what it validates is the
+  behavior a consumer sees, not an internal table that might disagree with it.
+  It separates a MISMATCH — the registry contradicting the schema, a defect —
+  from a GAP — the registry being silent, which is only coverage. The invariant
+  that makes it worth running is containment: a `LegalChildren` list documented
+  as COMPLETE may omit a schema child only while that element is also
+  UNREGISTERED, because `EndsUnknownSizeMaster` refuses to end a master on an
+  unregistered ID. Registering a `Segment` or `Cluster` child without adding it
+  to `completeChildren` in the same change breaks the unknown-size boundary
+  rule, which is why registering an element is never a local edit.
 
 ## Current state
 
@@ -214,6 +234,12 @@ focused on broader reading conformance and Matroska coverage:
 1. Add CRC-32 validation; CRC-32 and Void are currently opaque skippable leaves.
    Note it cannot live in `go/parser`, which holds no element knowledge.
 2. Broaden Matroska value and element coverage beyond the KVS fragment shape.
+   The worklist is no longer guesswork: the registry knows 82 of the 273
+   elements the official schemas declare, and `conformance-check` prints the
+   remaining 191 grouped by parent master. The registry currently reports ZERO
+   mismatches against `matroska-specification@f93ab02` /
+   `ebml-specification@a4b3c4a`, so every remaining item is coverage, not a
+   defect. Extend one master at a time and re-run the check.
    The core remains terminal on structural corruption; recovery belongs to the
    opt-in `ext/fragment` paths — `WithResync` for structural failures,
    `WithSkipContentErrors` for content ones — and each acts on its own class only.
@@ -226,6 +252,15 @@ Run commands from `go/`:
 go test ./...
 go vet ./...
 go run ./internal/kvsgen/genfixtures
+```
+
+Checking the registry against the official schemas needs those schemas fetched
+first, which is what the `conformance-check` skill is for. The command it ends
+up running, from the repository root:
+
+```bash
+go -C go run ./internal/specconform/checkschema \
+  -schema ../.spec-cache/ebml.xml -schema ../.spec-cache/ebml_matroska.xml -missing
 ```
 
 Run the separate KVS module commands from `go/kvs/`:

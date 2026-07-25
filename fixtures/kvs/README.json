@@ -352,8 +352,8 @@
       "fragment_numbers": [
         "unknown-0"
       ],
-      "bytes": 565,
-      "notes": "0xEE leaf and 0x4FFF master-shaped element are unregistered; the reader never breaks on them."
+      "bytes": 566,
+      "notes": "0x4FFE leaf and 0x4FFF master-shaped element are unregistered; the reader never breaks on them."
     }
   },
   "generated_by": "go run ./internal/kvsgen/genfixtures",
