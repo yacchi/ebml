@@ -7,13 +7,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/yacchi/ebml/kvs"
 )
 
 // loadFixture decodes a committed fixtures/kvs/<name>.ebml.hex file (comment
 // lines beginning with '#' stripped) into the raw EBML byte stream.
 func loadFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "fixtures", "kvs", name+".ebml.hex")
+	path := filepath.Join("..", "..", "..", "..", "fixtures", "kvs", name+".ebml.hex")
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read fixture %s: %v", name, err)
@@ -115,14 +117,14 @@ func TestPartialTagsInheritMissingIdentityKeys(t *testing.T) {
 
 // TestParseProducerTimestamp covers the inline decimal-seconds parsing.
 func TestParseProducerTimestamp(t *testing.T) {
-	tm, err := parseProducerTimestamp("1000000000.512")
+	tm, err := kvs.ParseTimestamp("1000000000.512")
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	if tm.Unix() != 1000000000 || tm.Nanosecond() != 512000000 {
 		t.Fatalf("got unix=%d nsec=%d", tm.Unix(), tm.Nanosecond())
 	}
-	if _, err := parseProducerTimestamp("not-a-number"); err == nil {
+	if _, err := kvs.ParseTimestamp("not-a-number"); err == nil {
 		t.Fatal("expected error for non-numeric timestamp")
 	}
 }

@@ -237,16 +237,17 @@ failure is ever dropped silently. `UnknownSizeLeafError` is typed so an
 unregistered unknown-size master can be diagnosed and fixed by extending the
 registry.
 
-### `examples/kvs-getmedia`
+### `go/kvs/examples/getmedia`
 
-`examples/kvs-getmedia` is a runnable, end-to-end demonstration of driving
-`fragment.Assembler` over a live Amazon Connect KVS GetMedia byte stream. AWS
-tag inheritance across a Segment's fragments is consumer policy, not something
-`ext/fragment` decides — `Fragment.Tags` returns exactly what that fragment's
-`Tags` element carried, non-nil and empty when it carried none. The example's
-`effectiveTags` accumulates known tag values per key, keyed by SegmentUUID: a
-key seen on any fragment of a given UUID stays available to later fragments of
-that same UUID, regardless of which other keys the current fragment carries.
+`go/kvs/examples/getmedia` is a runnable, end-to-end demonstration of driving
+the separate `kvs` module over a live Amazon Connect KVS GetMedia byte stream.
+
+Tag inheritance is not something `ext/fragment` decides: `Fragment.Tags`
+returns exactly what that fragment's `Tags` element carried, non-nil and empty
+when it carried none. The policy lives one layer up, in `kvs`, and it inherits
+per key rather than per whole `Tags` element — a key seen on any fragment of a
+given SegmentUUID stays available to later fragments of that same UUID,
+regardless of which other keys the current fragment carries.
 This matches the field shape observed in production Amazon Connect streams,
 which is **partial** rather than all-or-nothing: `Tags` is present and
 populated, but an identity key such as `ContactId` can be missing from one
@@ -274,6 +275,40 @@ header is rebuilt at its original size-VINT width — which the retained
 `HeaderLen` still states, so a non-minimal size VINT or a one-byte unknown-size
 marker survives. A round trip over the corpus is therefore a conformance test of
 retention itself.
+
+## Amazon Kinesis Video Streams: the `kvs` submodule
+
+`github.com/yacchi/ebml/kvs` is a separate Go module so the core module never
+carries AWS-specific dependencies. It currently has **no AWS SDK dependency at
+all**, and it does not include a GetMedia API wrapper: callers provide the
+already-obtained byte stream. This package is not affiliated with, endorsed by,
+or sponsored by Amazon Web Services; AWS service names appear descriptively only.
+
+```go
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/yacchi/ebml/kvs"
+)
+
+func main() {
+	reader := kvs.NewReader(os.Stdin)
+	for {
+		fragment, metadata, err := reader.Next()
+		if err == io.EOF {
+			return
+		}
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(metadata.FragmentNumber, len(fragment.Blocks))
+	}
+}
+```
 
 ## Writing
 

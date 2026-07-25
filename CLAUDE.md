@@ -150,6 +150,9 @@ The core is working and tested:
   `Fragment` per completed `Cluster` by pulling `Cursor.Next` in its own loop,
   using only exported core APIs, with `WithResync` and `WithSkipContentErrors`
   as its two opt-in, per-error-class recovery options.
+* `go/kvs` is a separate module holding all KVS-specific tag and metadata
+  knowledge; the core module has no KVS element or tag knowledge left. The
+  runnable example moved to `go/kvs/examples/getmedia`.
 * The module is `github.com/yacchi/ebml`, and the CLI is `ebml` under
   `go/cmd/ebml`. The public `go/writer` package replaced the four private
   encoders formerly in `internal/kvsgen`, `ext/tree/tree_test.go`,
@@ -195,6 +198,14 @@ Run commands from `go/`:
 go test ./...
 go vet ./...
 go run ./internal/kvsgen/genfixtures
+```
+
+Run the separate KVS module commands from `go/kvs/`:
+
+```bash
+go test ./...
+go vet ./...
+go run ./examples/getmedia
 ```
 
 Fixtures under `fixtures/**/*.ebml.hex` are commented hexadecimal and entirely
