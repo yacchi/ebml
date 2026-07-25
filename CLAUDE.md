@@ -60,11 +60,14 @@ carries no meaning.
   (`Registry.EndsUnknownSizeMaster`) — a boundary is reported only when the
   registry holds a COMPLETE child list for the open master and `next` is a
   built-in, non-global element absent from it, because a false boundary corrupts
-  the parse while a missed one only closes later than it could. `ext/fragment`
-  and `go/cmd/ebml` both call it and neither restates it. They did once: the CLI
-  kept its own copy answering only about `EBML`/`Segment`, and so rendered a live
-  stream's trailing `Tags` inside its `Cluster` while the assembler read the same
-  bytes correctly. Never reintroduce a second copy.
+  the parse while a missed one only closes later than it could. `ext/fragment`,
+  `go/cmd/ebml` and `internal/ebmltrace` all call it and none restates it. All
+  three did once, and each copy went stale on its own schedule: the CLI rendered
+  a live stream's trailing `Tags` inside its `Cluster` while the assembler read
+  the same bytes correctly, and `ebmltrace` wrote GOLDEN FILES in that same wrong
+  shape — a conformance corpus for a reader nobody ships. Never reintroduce a
+  copy; a golden produced by a rule the library does not use is worse than no
+  golden, because it looks like evidence.
 * `CloseMaster` is explicit boundary closure only. It accepts an unknown-size
   master, or a known-size master already at its declared end, and rejects a
   known-size master with payload outstanding (`PrematureCloseError`); a
