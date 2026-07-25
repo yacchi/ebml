@@ -188,7 +188,10 @@ The core is working and tested:
   `LegalChildren` and `EndsUnknownSizeMaster` use deny-only complete RFC 9559
   containment lists; `ext/fragment` now ends an unknown-size Cluster at the
   first registered element that cannot be its child. Unknown IDs classify as
-  readable binary leaves and never trigger a containment boundary.
+  readable binary leaves and never trigger a containment boundary. The table
+  names 270 of the schema's 273 elements, checked element by element by
+  `internal/specconform`; the three exceptions are the deprecated Cluster
+  children and are documented where the containment lists are.
 * `go/ext/tree` retains a generic tree and implements loose `Descendants` and
   strict `Find`/ancestry navigation. `Marshal`/`MarshalBytes` write a tree back
   out; parse then marshal is BYTE-IDENTICAL for every committed fixture unless a
@@ -233,13 +236,13 @@ focused on broader reading conformance and Matroska coverage:
 
 1. Add CRC-32 validation; CRC-32 and Void are currently opaque skippable leaves.
    Note it cannot live in `go/parser`, which holds no element knowledge.
-2. Broaden Matroska value and element coverage beyond the KVS fragment shape.
-   The worklist is no longer guesswork: the registry knows 82 of the 273
-   elements the official schemas declare, and `conformance-check` prints the
-   remaining 191 grouped by parent master. The registry currently reports ZERO
-   mismatches against `matroska-specification@f93ab02` /
-   `ebml-specification@a4b3c4a`, so every remaining item is coverage, not a
-   defect. Extend one master at a time and re-run the check.
+2. Element coverage is DONE and is now a checked property, not a claim: the
+   registry names 270 of the 273 elements the official schemas declare, with
+   ZERO mismatches against `matroska-specification@f93ab02` /
+   `ebml-specification@a4b3c4a`. The three it does not name are `SilentTracks`,
+   `SilentTrackNumber` and `EncryptedBlock`, left out on purpose and explained
+   at `completeChildren`. Remaining work is VALUE coverage — decoding helpers
+   for the types now merely named — not more IDs.
    The core remains terminal on structural corruption; recovery belongs to the
    opt-in `ext/fragment` paths — `WithResync` for structural failures,
    `WithSkipContentErrors` for content ones — and each acts on its own class only.

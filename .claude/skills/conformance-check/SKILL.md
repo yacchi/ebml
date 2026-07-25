@@ -47,7 +47,8 @@ gh api repos/ietf-wg-cellar/ebml-specification/commits/master --jq .sha
 ```
 
 Last verified: `matroska-specification` at `f93ab02`, `ebml-specification` at
-`a4b3c4a` (schema `docType="matroska" version="4"`, 273 distinct elements).
+`a4b3c4a` (schema `docType="matroska" version="4"`, 273 distinct elements;
+registry at 270 of them, 0 mismatches).
 If a fetch fails, the same files are reachable from
 `https://github.com/ietf-wg-cellar/{ebml,matroska}-specification` and the
 underlying specifications are RFC 8794 (EBML) and RFC 9559 (Matroska).

@@ -79,6 +79,39 @@ func TestSegmentAndClusterChildListsMatchRFC9559(t *testing.T) {
 	}
 }
 
+// TestDeprecatedClusterChildrenStayUnregistered pins the pairing that makes the
+// Cluster child list safe to call COMPLETE while omitting two elements the
+// schema declares. SilentTracks and EncryptedBlock are legal Cluster children,
+// so registering either without adding it to completeChildren would make it end
+// every unknown-size Cluster it appears in -- silently truncating a fragment on
+// a legal file. They are the only two elements in the whole schema this
+// registry deliberately does not name, and internal/specconform reports the
+// same pairing against the published schema; this test states it without
+// needing the schema on disk.
+func TestDeprecatedClusterChildrenStayUnregistered(t *testing.T) {
+	deprecated := []struct {
+		id   parser.ElementID
+		name string
+	}{
+		{0x5854, "SilentTracks"},
+		{0x58D7, "SilentTrackNumber"},
+		{0xAF, "EncryptedBlock"},
+	}
+	for _, element := range deprecated {
+		if info, ok := Lookup(element.id); ok {
+			t.Fatalf("%s (%s) is registered as %q; add it to completeChildren[IDCluster] "+
+				"in the same change or it will end every unknown-size Cluster it appears in",
+				element.name, element.id, info.Name)
+		}
+		if _, ok := IDForName(element.name); ok {
+			t.Fatalf("%s resolves by name; see the comment on completeChildren", element.name)
+		}
+		if EndsUnknownSizeMaster(IDCluster, element.id) {
+			t.Fatalf("%s must never end an unknown-size Cluster", element.name)
+		}
+	}
+}
+
 // TestLegalChildrenIsSortedByID pins the documented ordering guarantee.
 func TestLegalChildrenIsSortedByID(t *testing.T) {
 	for _, master := range []parser.ElementID{IDSegment, IDCluster} {
