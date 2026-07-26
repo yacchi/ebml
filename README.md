@@ -373,6 +373,22 @@ decodes `SimpleBlock`s into `Blocks`, and provides metadata and timing helpers:
 Absolute block time is `(ClusterTimestamp + block.Timecode) * TimestampScale`;
 both operands are in scale units and the relative timecode is signed.
 
+A stream that ends **inside an element** — which is what every dropped live
+connection looks like — still reports its truncation from `Finalize`, and the
+`Cluster` that was open when the bytes stopped is emitted alongside that error
+with `Fragment.Truncated` set. This is not opt-in and softens nothing: the error
+is returned, latched, and reported again by every later call, exactly as before;
+what changes is only that the blocks which decoded completely before the cut are
+reachable instead of discarded. It is the same rule `Feed` already states — an
+error never discards the good prefix — applied to the tail itself. The fragment
+is emitted even when no block decoded, because whether one is worth keeping is a
+judgement the caller makes with `len(Blocks)`, while whether one exists is
+structural. Inside the tree the cut element keeps its place with
+`tree.Element.Truncated` set and no payload, so the `Cluster`'s shape still
+accounts for the bytes; `Fragment.Truncated` is the flag that distinguishes a
+salvaged fragment, because the element-level flag is set on every retained
+`SimpleBlock` anyway.
+
 Assembler options include `WithMaxRetainedPayload` for a payload cap,
 `WithRegistry` for custom classification, and one option per error class, each
 opt-in and each terminal by default:

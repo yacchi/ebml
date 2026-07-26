@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"slices"
 	"testing"
 
 	"github.com/yacchi/ebml/internal/ebmltest"
@@ -183,4 +184,78 @@ func testSegment(seed byte, number, contact string) []byte {
 			cluster,
 		),
 	)
+}
+
+// truncatedTailStream is two complete KVS documents followed by one cut inside a
+// SimpleBlock payload, which is what a dropped GetMedia connection looks like: the
+// blocks before the cut decoded, the bytes after it never arrived.
+func truncatedTailStream(t *testing.T) []byte {
+	t.Helper()
+	simpleTag := func(name, value string) ebmltest.Node {
+		return ebmltest.Master(matroska.IDSimpleTag,
+			ebmltest.UTF8(matroska.IDTagName, name),
+			ebmltest.UTF8(matroska.IDTagString, value))
+	}
+	doc := func(seed byte, number string) []byte {
+		return ebmltest.Encode(
+			ebmltest.Master(matroska.IDEBML, ebmltest.Uint(matroska.IDEBMLVersion, 1)),
+			ebmltest.UnknownMaster(matroska.IDSegment,
+				ebmltest.Master(matroska.IDInfo,
+					ebmltest.Leaf(matroska.IDSegmentUUID, bytes.Repeat([]byte{seed}, 16))),
+				ebmltest.Master(matroska.IDTags,
+					ebmltest.Master(matroska.IDTag, simpleTag(TagFragmentNumber, number))),
+				// Unknown-size, because that is the only Cluster shape KVS sends.
+				ebmltest.UnknownMaster(matroska.IDCluster,
+					ebmltest.Uint(matroska.IDTimestamp, 0),
+					ebmltest.Leaf(matroska.IDSimpleBlock, []byte{0x81, 0, 0, 0, 0x11, 0x22}),
+					ebmltest.Leaf(matroska.IDSimpleBlock, []byte{0x81, 0, 10, 0, 0x33, 0x44}),
+				),
+			),
+		)
+	}
+	var raw []byte
+	raw = append(raw, doc(1, "100")...)
+	raw = append(raw, doc(2, "101")...)
+	cut := doc(3, "102")
+	return append(raw, cut[:len(cut)-3]...)
+}
+
+// TestReaderDeliversSalvagedTailBeforeError pins the Reader's half of the salvage
+// contract: the assembler returns its truncation error together with the Cluster
+// the cut left open, and the Reader must hand that fragment over before reporting
+// the error rather than dropping it. The error is not softened -- it is reported
+// once the queue runs out, and stays sticky.
+func TestReaderDeliversSalvagedTailBeforeError(t *testing.T) {
+	r := NewReader(bytes.NewReader(truncatedTailStream(t)))
+
+	var numbers []string
+	var truncatedSeen int
+	var err error
+	for {
+		f, m, e := r.Next()
+		if e != nil {
+			err = e
+			break
+		}
+		numbers = append(numbers, m.FragmentNumber)
+		if f.Truncated {
+			truncatedSeen++
+			if len(f.Blocks) != 1 {
+				t.Errorf("salvaged fragment carries %d blocks, want the 1 that decoded", len(f.Blocks))
+			}
+		}
+	}
+
+	if err == nil || err == io.EOF {
+		t.Fatalf("Next ended with %v, want the truncation reported", err)
+	}
+	if want := []string{"100", "101", "102"}; !slices.Equal(numbers, want) {
+		t.Fatalf("delivered fragments %v, want %v including the salvaged one", numbers, want)
+	}
+	if truncatedSeen != 1 {
+		t.Fatalf("%d fragments marked Truncated, want exactly the last one", truncatedSeen)
+	}
+	if _, _, e := r.Next(); e != err {
+		t.Fatalf("Next after the truncation = %v, want the sticky %v", e, err)
+	}
 }

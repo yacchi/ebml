@@ -97,6 +97,26 @@ type Fragment struct {
 	// element -- so a fragment whose Blocks cover less than its Cluster's extent is
 	// exactly the case that notify announced.
 	Blocks []*parser.SimpleBlock
+
+	// Truncated marks a fragment SALVAGED from a stream that ended inside an
+	// element: the Cluster never closed, and this fragment carries the blocks that
+	// had decoded completely before the cut. It is false for every fragment emitted
+	// at a Cluster's own end, which is all of them on a stream that ends cleanly.
+	//
+	// A truncated fragment is delivered by Finalize TOGETHER WITH the structural
+	// error that reports the truncation, never instead of it, so this field is not
+	// how the anomaly is discovered -- the error is. It is how a consumer that keeps
+	// the fragment tells it apart from a complete one, which is what it needs to log
+	// the anomaly rather than treat a short Cluster as normal.
+	//
+	// It cannot be spelled with tree.Element.Truncated, because that flag is already
+	// set on EVERY retained SimpleBlock -- their bytes live in Blocks instead -- so
+	// it does not distinguish a salvaged fragment from a complete one. Inside the
+	// tree the flag keeps its ordinary meaning: the element the stream was cut
+	// inside is retained with Truncated set and no payload, so the Cluster's shape
+	// still accounts for the bytes, while the block it would have decoded into is
+	// absent from Blocks.
+	Truncated bool
 }
 
 // Values returns every element with the given ID anywhere in this fragment's

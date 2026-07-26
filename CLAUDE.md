@@ -229,6 +229,26 @@ carries no meaning.
   leaves the structural position intact. Both are terminal by default and both
   report every recovery to a `notify`; a nil `notify` disables the option rather
   than silencing it.
+* A truncated tail is SALVAGED, not discarded, and that is DEFAULT behavior with
+  no option attached. `ext/fragment.Assembler.Finalize` emits the `Cluster` that
+  was still open when the input ended, marked `Fragment.Truncated`, TOGETHER WITH
+  the structural error — which is still returned, still latched, and still
+  reported by every later call. It is not a third recovery option because it is
+  not recovery: `WithResync` and `WithSkipContentErrors` are opt-in precisely
+  because they change an error's TERMINALITY, and this changes none of it, only
+  whether already-decoded blocks are reachable. `Feed` already documents that an
+  error comes with the fragments that completed before it, so `Finalize`
+  discarding the tail was the inconsistency, not the fix. The fragment is emitted
+  even with zero decoded blocks: "the Cluster was open" is structural, "is this
+  fragment worth anything" is the caller's `len(Blocks)`. The marker CANNOT be
+  `tree.Element.Truncated`, which is already set on every retained `SimpleBlock`
+  and so cannot tell a salvaged fragment from a complete one; inside the tree
+  that flag keeps its ordinary meaning and marks the element the cut fell inside.
+  `kvs.Reader.Next` carries the same rule: queued fragments are delivered first
+  and the error is reported once they run out. This shape is NOT in the shared
+  fixture corpus and must not be added to it — every fixture must parse cleanly
+  and round-trip byte-identically, which a truncated one cannot; it is covered by
+  package-level synthetic tests in both modules instead.
 * There is no query DSL or second index type.
 * A documented guarantee is never weakened to match an implementation gap.
   When the KVS consumer review (`KVS-CONSUMER-FEEDBACK.md`, F1) reported the

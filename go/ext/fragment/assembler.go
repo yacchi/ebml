@@ -300,6 +300,22 @@ func (a *Assembler) Feed(chunk []byte) ([]*Fragment, error) {
 // as soon as its bytes are in -- and a structural error if EOF arrived inside an
 // element.
 //
+// THE ERROR COMES WITH THE FRAGMENT, NEVER INSTEAD OF IT. An input cut inside an
+// element is what every dropped live connection looks like, and the blocks that
+// decoded completely before the cut are not made worthless by the bytes that never
+// arrived. So when the stream ends with a Cluster still open, that Cluster is
+// emitted as a final Fragment with Truncated set, alongside the error -- the same
+// rule Feed already states, that a malformed tail never discards a good prefix,
+// applied to the tail itself. The error is unchanged by this: it is returned, it is
+// latched, and every later call reports it again, so nothing is accepted silently.
+// A consumer that would rather discard the salvaged fragment still can; one that
+// keeps it has Truncated to tell it apart from a complete one.
+//
+// The fragment is emitted even when NO block decoded before the cut. Whether an
+// almost-empty fragment is worth anything is a judgement about content, which the
+// caller makes with len(Blocks); whether a fragment exists at all is structural,
+// and the answer is that the Cluster was open.
+//
 // Recovery does not apply at EOF, there being no further bytes to resynchronize
 // on: when a resync was still pending, the trailing bytes are discarded and
 // Finalize reports the error that started it.
@@ -319,17 +335,47 @@ func (a *Assembler) Finalize() ([]*Fragment, error) {
 	}
 	// A payload still outstanding here is a stream that ended inside an element,
 	// which the cursor's own Finalize is what diagnoses; the node must not be
-	// retried afterwards, since Finalize invalidates it.
+	// retried afterwards, since Finalize invalidates it. Drain has already retried
+	// it as far as the bytes allow, so what is left is the cut element itself: it
+	// keeps its place in the retained tree with Truncated set and no payload, so the
+	// Cluster's shape still accounts for the bytes, while the block it would have
+	// decoded into is simply absent from Blocks.
+	if a.leafEl != nil {
+		a.leafEl.Truncated = true
+	}
 	a.leaf, a.leafEl = nil, nil
 	if err := a.c.Finalize(); err != nil {
-		return a.emitted, a.fail(err)
+		return a.salvage(), a.fail(err)
 	}
 	// Finalize keeps whatever the buffered bytes still complete, so the masters it
 	// closed -- the trailing Segment above all -- are reported by these pulls.
 	if err := a.drain(); err != nil {
-		return a.emitted, a.fail(err)
+		return a.salvage(), a.fail(err)
 	}
 	return a.emitted, nil
+}
+
+// salvage emits the Cluster that was still open when the stream ended, with the
+// blocks that had decoded completely, and returns everything this Finalize
+// produced. It is called on the failure paths of Finalize only: a Cluster that
+// reached its own end has already been emitted by end, and one still open at EOF
+// is exactly the fragment the error would otherwise discard.
+//
+// The Segment-scoped state goes with it, so a salvaged Cluster cannot be emitted
+// twice -- Finalize latches the error anyway, but the state a fragment now owns is
+// not left behind as this assembler's.
+func (a *Assembler) salvage() []*Fragment {
+	if a.cluster == nil {
+		return a.emitted
+	}
+	a.emitted = append(a.emitted, &Fragment{
+		Segment:   a.segment,
+		Cluster:   a.cluster,
+		Blocks:    a.blocks,
+		Truncated: true,
+	})
+	a.resetSegment()
+	return a.emitted
 }
 
 // fail latches a terminal error so every later call reports it again.

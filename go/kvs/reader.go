@@ -73,6 +73,14 @@ func NewReader(r io.Reader, opts ...Option) *Reader {
 
 // Next returns the next completed fragment and its metadata. It returns io.EOF,
 // and only io.EOF, when the stream ended cleanly.
+//
+// A FAILURE NEVER DISCARDS THE FRAGMENTS THAT PRECEDED IT. The assembler returns
+// its error together with whatever it had assembled -- including, at EOF, the
+// Cluster that a stream cut mid-element left open, which arrives marked
+// fragment.Fragment.Truncated. Those fragments are delivered by the calls that
+// follow, and the error is reported once they run out, so a dropped GetMedia
+// connection costs the caller only the bytes that never arrived. Once reported the
+// error is sticky, exactly as before.
 func (r *Reader) Next() (*fragment.Fragment, Metadata, error) {
 	var zero Metadata
 	if r.returnedEOF {
@@ -89,26 +97,28 @@ func (r *Reader) Next() (*fragment.Fragment, Metadata, error) {
 		n, err := r.source.Read(r.buffer)
 		if n > 0 {
 			frags, ferr := r.assembler.Feed(r.buffer[:n])
-			if ferr != nil {
-				r.sticky = ferr
-				return nil, zero, ferr
-			}
 			r.queue = append(r.queue, frags...)
+			if ferr != nil {
+				// Queued fragments are handed over first; the next loop turn with an
+				// empty queue is where this error is reported.
+				r.sticky = ferr
+				continue
+			}
 		}
 		if err != nil {
 			if err != io.EOF {
 				r.sticky = err
-				return nil, zero, err
+				continue
 			}
 			r.sourceDone = true
 			if !r.finalized {
 				r.finalized = true
 				frags, ferr := r.assembler.Finalize()
+				r.queue = append(r.queue, frags...)
 				if ferr != nil {
 					r.sticky = ferr
-					return nil, zero, ferr
+					continue
 				}
-				r.queue = append(r.queue, frags...)
 			}
 		}
 	}
