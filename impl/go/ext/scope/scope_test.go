@@ -78,7 +78,9 @@ func TestUnobservedNodeIsNotInScope(t *testing.T) {
 	s := stream.New(bytes.NewReader(raw), matroska.KindForElementID)
 	tkr := scope.NewTracker(matroska.IDSegment, s)
 	n := pull(t, s)
-	tkr.Observe(n)
+	if _, err := tkr.Observe(n); err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
 	n.(*parser.MasterNode).Descend()
 	pull(t, s).(*parser.MasterNode).Skip()
 	if got := tkr.Finish().Get(matroska.IDInfo); got.Exists() {

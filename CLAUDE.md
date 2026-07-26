@@ -154,6 +154,14 @@ go -C impl/go run ./internal/specconform/checkschema \
   -schema ../../.spec-cache/ebml.xml -schema ../../.spec-cache/ebml_matroska.xml -missing
 ```
 
+`.golangci.yml` is the lint configuration for both modules, and
+`golangci-lint run ./...` reproduces `.github/workflows/lint.yml` locally. It
+runs the default linter set; the standing rules a linter cannot see are pinned
+by `internal/archtest` and the test suite instead. Writing to an
+already-obtained writer is the one unchecked return this tree keeps — every
+other ignored return is spelled `_ =` at the call site, so it reads as a
+decision.
+
 CI runs those same commands, under `-race`, once per module. Two gates are not
 reproducible by reading the code alone and are worth knowing about before a
 change lands: `.github/workflows/ci.yml` regenerates the corpus and FAILS ON ANY

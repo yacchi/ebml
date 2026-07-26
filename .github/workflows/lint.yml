@@ -1,0 +1,49 @@
+name: Lint
+
+# Go Report Card, which this replaced, was retired in 2026. golangci-lint is
+# what grades this tree now, and unlike a hosted badge it runs on the same
+# commit the tests do and can fail a pull request.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  golangci-lint:
+    name: golangci-lint (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: core
+            dir: impl/go
+          - name: integrations/kvs
+            dir: impl/go/integrations/kvs
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.dir }}/go.mod
+          cache: false
+
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.7.2
+          working-directory: ${{ matrix.dir }}
+
+      # gofmt is one of the formatters in .golangci.yml, so it is checked here
+      # rather than as a separate step somewhere else.
+      - name: Check formatting
+        run: golangci-lint fmt --diff
+        working-directory: ${{ matrix.dir }}

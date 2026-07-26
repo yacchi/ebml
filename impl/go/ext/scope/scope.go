@@ -62,8 +62,6 @@ func (t *Tracker) Observe(n parser.Node) (done *Scope, err error) {
 				done = closed
 			}
 		}
-		if t.current != nil {
-		}
 		return done, nil
 	}
 	done = t.unwind(n.Depth(), n.Offset())

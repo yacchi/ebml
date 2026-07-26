@@ -1,0 +1,22 @@
+version: "2"
+
+# The default set — errcheck, govet, ineffassign, staticcheck, unused — with no
+# additions. Both modules have zero third-party requires, and the standing rules
+# a linter cannot see (layer boundaries, node lifetime, one encoder) are pinned
+# by internal/archtest and the test suite instead.
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # Writing to an already-obtained writer is the one unchecked return this
+      # tree keeps: the CLI's writer is stdout, whose failure is the process's
+      # exit status, and specconform reports into a buffer. Every OTHER ignored
+      # return is spelled `_ =` at the call site, so it reads as a decision.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+
+formatters:
+  enable:
+    - gofmt

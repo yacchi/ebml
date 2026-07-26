@@ -282,18 +282,6 @@ func (s *stream) unknownCluster(clusterTS uint64, blocks ...block) {
 	})
 }
 
-func (s *stream) twoTrackCluster(clusterTS uint64, blocks ...struct {
-	track uint64
-	block
-}) {
-	s.master(matroska.IDCluster, func() {
-		s.uint(matroska.IDTimestamp, clusterTS)
-		for _, b := range blocks {
-			s.simpleBlockOnTrack(b.track, b.block)
-		}
-	})
-}
-
 func (s *stream) unknownTwoTrackCluster(clusterTS uint64, blocks ...struct {
 	track uint64
 	block

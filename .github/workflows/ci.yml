@@ -63,26 +63,6 @@ jobs:
           flags: ${{ matrix.flag }}
           fail_ci_if_error: true
 
-  format:
-    name: gofmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: impl/go/go.mod
-          cache: false
-
-      - name: Check formatting
-        run: |
-          unformatted="$(gofmt -l impl/go)"
-          if [ -n "$unformatted" ]; then
-            echo "gofmt reports these files:"
-            echo "$unformatted"
-            exit 1
-          fi
-
   fixtures:
     name: corpus is reproducible
     runs-on: ubuntu-latest

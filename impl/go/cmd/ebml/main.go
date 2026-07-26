@@ -68,7 +68,7 @@ func openInput(args []string, stdin io.Reader) (io.Reader, func(), error) {
 	if err != nil {
 		return nil, func() {}, err
 	}
-	return f, func() { f.Close() }, nil
+	return f, func() { _ = f.Close() }, nil
 }
 
 // sourceReader returns r unchanged for raw EBML input. When asHex is set it

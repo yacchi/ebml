@@ -554,7 +554,9 @@ func (c *Cursor) Feed(chunk []byte) {
 		return
 	}
 	if c.finalized {
-		c.fail(Invalid{Msg: "cannot feed a finalized cursor"})
+		// The latched error is what the next Next reports; fail's return value
+		// has no one to go to, since Feed reports nothing itself.
+		_ = c.fail(Invalid{Msg: "cannot feed a finalized cursor"})
 		return
 	}
 	c.p.Feed(chunk)

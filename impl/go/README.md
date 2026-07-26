@@ -1,7 +1,7 @@
 # `impl/go/` — the Go implementation
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/yacchi/ebml/impl/go.svg)](https://pkg.go.dev/github.com/yacchi/ebml/impl/go)
-[![Go Report Card](https://goreportcard.com/badge/github.com/yacchi/ebml/impl/go)](https://goreportcard.com/report/github.com/yacchi/ebml/impl/go)
+[![Lint](https://github.com/yacchi/ebml/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/yacchi/ebml/actions/workflows/lint.yml)
 [![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/dl/)
 [![codecov](https://codecov.io/gh/yacchi/ebml/branch/main/graph/badge.svg?flag=core)](https://codecov.io/gh/yacchi/ebml?flags%5B0%5D=core)
 

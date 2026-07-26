@@ -281,7 +281,7 @@ func (p *Parser) EnterMaster() error {
 		return Invalid{Msg: "current element is not master"}
 	}
 
-	var end int64 = UnknownSize
+	end := UnknownSize
 	if p.current.size >= 0 {
 		end = p.absOffset + p.current.size
 	}
