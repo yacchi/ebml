@@ -1,9 +1,15 @@
 # Streaming EBML Cursor Specification
 
-This document specifies the portable core of `ebml`. It is a behavioral
-contract for incremental EBML readers; it is not a document-model or retention
-API. The core consists of an explicitly pull-driven cursor with distinguishable
-events and flow control, plus a separate element registry and classifier.
+This document specifies the portable core of `ebml`: a behavioral contract for
+incremental EBML readers. The READING SURFACE is an explicitly pull-driven
+cursor with distinguishable events and flow control, never a document-model
+interface. Around it the core also specifies the element registry and
+classifier, the retained element model, and the byte-supply contract a
+source-owning driver honours.
+
+A package belongs to that core when a port must agree on it to interoperate.
+Ways of USING the core -- the packages under `go/ext/` -- are outside this
+contract, and another language may shape them differently or omit them.
 
 ## Relation to existing models
 
@@ -12,8 +18,10 @@ flavour of StAX than to a callback reader. Input is pushed as chunks, and one
 event is acquired at a time; the cursor reports need-more-data instead of
 blocking on a stream. The former SAX-shaped callback layer is gone. On each
 header, the consumer decides whether to descend and whether a leaf payload is
-materialised, while keeping its state in local variables. The retained tree in
-the optional layer still plays the DOM role and is outside this contract.
+materialised, while keeping its state in local variables. The retained model
+plays the DOM role and is specified in its own section below, while the reading
+surface remains cursor-shaped. A port may implement the cursor without offering
+retention; the conformance rules state which requirements then apply.
 
 The analogy is inexact in several EBML-specific ways. Explicit element sizes
 make extents first-class, so skipping a subtree is arithmetic rather than a
@@ -78,7 +86,7 @@ implementation need not provide writing.
 > **Go mapping (non-normative):** package `writer` provides `Writer`,
 > `StartMaster`, `EndMaster`, `Buffered`, `Reserved`, `UnknownSize`, and the
 > value methods `Uint`, `Int`, `Float`, `String`, `UTF8`, `Date`, `Binary`, and
-> `Leaf`. Package `ext/tree` provides `Marshal` and `MarshalBytes`.
+> `Leaf`. Package `tree` provides `Marshal` and `MarshalBytes`.
 
 ### SimpleBlock payload codec
 
@@ -203,12 +211,12 @@ The conceptual operations are:
 Operations that do not fit the current cursor state are invalid. A cursor that
 reports a terminal structural error remains failed. A consumer's own verdict about
 an element's content is a distinct class a consumer must be able to separate from
-it; see "Error classification" in section 6.
+it; see "Error classification" in section 8.
 
 ## 3. Event model
 
 Event acquisition is a **pull operation**: each operation reports one next event,
-or one of the non-event outcomes of section 6: need-more-data, end of input, or a
+or one of the non-event outcomes of section 8: need-more-data, end of input, or a
 structural failure. There are exactly three distinguishable event kinds:
 
 * a **master start** (its header), on which the consumer decides descend or skip
@@ -234,7 +242,7 @@ versus leaf, plus the end-of-master marker — and it is reported so a consumer 
 see what the element was read by. It is **not** the value type to interpret a
 payload as: a classifier only has to separate masters from leaves for a stream to be
 read correctly, so its leaf kinds are whatever it chose to distinguish and no more.
-A consumer that wants to **decode** a payload asks the registry of section 5 for the
+A consumer that wants to **decode** a payload asks the registry of section 7 for the
 element's value type, never the event's kind, since an unlisted or deliberately
 opaque element classifies as a binary or unknown leaf and that says nothing about
 the bytes.
@@ -252,7 +260,7 @@ An implementation must not require a per-event allocation to report ancestry.
 An event **is** invalidated by the following pull, so the values above must be read
 (or copied) before then. An implementation must state that rule and **must detect**
 every use of an invalidated event, without exception: every operation an event offers
-— the field accessors above exactly as much as the flow-control decisions of section 4
+— the field accessors above exactly as much as the flow-control decisions of section 6
 — is required to reject a use that happens after the following event has been
 acquired. The requirement does not depend on how the consumer held the event, nor on
 what the current event is: a handle the implementation delivered, an independent copy
@@ -260,7 +268,7 @@ of it, and a handle held while the current event is of the **same kind** as the 
 names are all invalidated alike. Silently answering such a use, so that a consumer
 observes the values of a later event through a handle it took earlier, is prohibited.
 Rejection reports a consumer defect and is therefore not one of the outcomes of
-section 6: no further input can repair it, and the position of the next event is
+section 8: no further input can repair it, and the position of the next event is
 unaffected.
 
 Total detection constrains delivery. An event must be delivered either as an
@@ -277,7 +285,7 @@ implementation that also offers a lower-level surface reporting each header as a
 plain value, which hands out no event object at all, must say so, since that is where
 a consumer unwilling to pay goes.
 
-Delivered payload bytes (section 4) carry the same lifetime. They may alias the
+Delivered payload bytes (section 6) carry the same lifetime. They may alias the
 implementation's own buffer, so they are valid only until the following event is
 acquired and must not be modified; a consumer that needs them beyond that, or needs
 to change them, copies them first. An implementation must not expose its own record
@@ -310,7 +318,56 @@ alter the reader's state.
 > `LeafNode.Payload` returns a view of the cursor's buffer and keeps only that view's
 > extent, never the slice it handed out.
 
-## 4. Flow control
+## 4. Retained element model
+
+A retained element preserves its element ID, the absolute offset of its header,
+the header length (the encoded length of the ID VINT plus the size VINT), its
+declared size, and either an owned payload for a leaf or ordered child elements
+for a master. Children are in stream order.
+
+The header length is retained as observed and is never recomputed. This
+preserves parse-then-marshal byte identity: a legal but non-minimal size-VINT
+width is retained rather than normalised away.
+
+A retained leaf payload is owned by the element. It is a copy, not a view of the
+reader's buffer; unlike a delivered reader-buffer view, it is not limited to
+the next pull. Retention is never gated on a registry lookup: an element unknown
+to the registry is retained like any other, and a master-shaped payload retained
+as opaque bytes can be re-parsed later.
+
+When a retention cap elides an element's payload, the element is marked
+truncated. Its extent remains readable even though its bytes are not.
+
+Retained access has two orthogonal modes. **Loose** extraction returns every
+matching element regardless of containment. **Strict** access uses exact paths
+and ancestry. Loose results keep their structure, so the two modes compose.
+
+The Go package `tree` is the retained-model realisation. A port that offers no
+retention is still conformant for reading; the round-trip requirement in the
+conformance section does not apply to it.
+
+## 5. Byte-supply contract
+
+A conforming implementation offers a way to drive the cursor from a byte source
+it owns. The source type is language-specific and deliberately unspecified;
+`io.Reader` is Go's spelling of such a source.
+
+The driver supplies bytes to the cursor for as long as the cursor reports
+need-more-data, and never reports need-more-data to its own caller. When the
+source is exhausted, the driver finalizes the input. A document that ended
+inside an element is then reported as a structural truncation error, never as a
+clean end of input. Omitting finalization would silently accept a truncated
+document.
+
+Supplying bytes does not invalidate the node the caller is holding. Finalizing
+does invalidate it, just as acquiring the next event does; see section 3 for
+the complete node and payload validity rule.
+
+This contract does not replace the cursor's push-bytes/pull-events split. A
+consumer that owns its own read loop drives the cursor directly and answers
+need-more-data itself.
+
+## 6. Flow control
 
 The consumer decides on the event it is holding, before requesting the next event
 and before payload bytes need to be present:
@@ -345,7 +402,7 @@ before the next element is reported at the enclosing depth. The rule belongs to 
 cursor as a whole, not to an individual event: a per-event answer would let the same
 stream be split differently depending on where the consumer happened to look.
 
-## 5. Classification and registry
+## 7. Classification and registry
 
 An implementation has no built-in element knowledge: the cursor owns no element
 table and must not hard-code any element ID, not even the ones that frame every
@@ -369,7 +426,7 @@ elements. An unknown ID is a readable binary leaf with its declared size. If it
 is actually a master, its payload remains complete and can be parsed later; it
 becomes a descended master only after the registry classifies it as one.
 
-## 6. Required errors
+## 8. Required errors
 
 An implementation must distinguish these behaviors:
 
@@ -449,7 +506,7 @@ returned directly, but it is not the classification test.
 unwraps to the consumer's own error so `errors.Is`/`errors.As` reach its sentinels
 and types unchanged.
 
-## 7. Conformance
+## 9. Conformance
 
 The repository is the conformance corpus.
 
@@ -497,6 +554,7 @@ This requirement also asserts that the retained model is lossless, including
 the original legal size-VINT width and the exact payload bytes. Reading-only
 ports remain conformant without implementing this requirement.
 
-The packages under `go/ext/` are outside this contract. The retained tree and
-the per-Cluster assembler are Go-only convenience layers and are not required
-of another-language implementation.
+The packages under `go/ext/` are outside this contract. `scope`, `tags`, and
+`fragment` are ways of using the core and are Go-only convenience layers whose
+shape another language may choose differently. The retained element model is
+specified above.

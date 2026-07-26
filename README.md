@@ -8,8 +8,9 @@ as soon as its declared bytes are consumed, even inside an unknown-size
 `Segment`.
 
 The core is specified in [`spec/SPEC.md`](spec/SPEC.md). A port implements the
-cursor, event model, flow control, and registry contract there. `ts/` and `py/`
-are placeholders, not additional implementations.
+cursor, event model, flow control, retained model, byte-supply, and registry
+contracts there. The reading surface does not require retention or buffer bulk
+payloads. `ts/` and `py/` are placeholders, not additional implementations.
 
 ## Core first
 
@@ -159,6 +160,45 @@ reached, and rejects a known-size master with payload still outstanding
 (`PrematureCloseError` / `ErrPrematureClose`) rather than reparent those bytes
 into the enclosing master.
 
+### `stream`
+
+`stream.Stream` owns an `io.Reader` and answers `NeedMoreData`, so consumers
+above it see only nodes, `io.EOF`, or a real failure. It preserves the
+header-first property: skipping a master or leaf does not materialise its
+payload.
+
+```go
+package main
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+
+	"github.com/yacchi/ebml/stream"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
+)
+
+func main() {
+	s := stream.New(bytes.NewReader(nil), matroska.KindForElementID)
+	for {
+		node, err := s.Next()
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(node.ID(), node.Kind(), node.Offset())
+		if leaf, ok := node.(*parser.LeafNode); ok {
+			_, _ = s.Payload(leaf)
+		}
+	}
+}
+```
+
 ## Error classification
 
 `Cursor.Next` reports one non-failure outcome and one failure class; a consumer
@@ -199,53 +239,38 @@ vendor element as `TypeMaster` makes the cursor descend into it.
 
 Unknown elements remain readable binary leaves with their declared extent.
 Unknown master-shaped payloads are not lost: parse the complete payload later
-with `ext/tree`, optionally using a registry that knows the element.
+with `tree`, optionally using a registry that knows the element.
 
-## Optional Go conveniences: `ext/`
+## `tree`: two orthogonal access modes
+
+| Mode | Operations | Meaning |
+| --- | --- | --- |
+| Loose extraction | `Descendants` | Containment ignored; every occurrence is returned as a node |
+| Strict structure | `Find` plus `Parent`, `Ancestor`, `Ancestors`, and `Path` | Exact paths and ancestry express containment |
+
+Loose results carry their own structure, so a caller can extract broadly and
+tighten a result later without re-reading the stream. There is no query DSL or
+second index type.
+
+`tree.Marshal` and `tree.MarshalBytes` write a retained tree back out through
+package `writer`, the only EBML encoder in this repository. Parse followed by
+marshal is byte-identical for every committed fixture, with one precondition:
+nothing was elided by a payload cap. Leaf payloads go out verbatim and each
+header is rebuilt at its original size-VINT width — which the retained
+`HeaderLen` still states, so a non-minimal size VINT or a one-byte unknown-size
+marker survives. A round trip over the corpus is therefore a conformance test of
+retention itself.
+
+## Ways of using the core
+
+Packages are in the core when ports must agree on them to interoperate; this
+layer contains ordinary ways of using that core whose shape another language
+may choose differently.
 
 Everything under `go/ext/` is outside the cross-language contract and is built
 only on exported core APIs. A missing capability in an extension is a core
 capability bug, not a reason to reach into parser internals. No retention path
 uses a per-element allowlist.
-
-### `ext/stream`
-
-`stream.Stream` owns an `io.Reader` and answers `NeedMoreData`, so consumers
-above it see only nodes, `io.EOF`, or a real failure. It preserves the
-header-first property: skipping a master or leaf does not materialise its
-payload.
-
-```go
-package main
-
-import (
-	"bytes"
-	"errors"
-	"fmt"
-	"io"
-
-	"github.com/yacchi/ebml/ext/stream"
-	"github.com/yacchi/ebml/matroska"
-	"github.com/yacchi/ebml/parser"
-)
-
-func main() {
-	s := stream.New(bytes.NewReader(nil), matroska.KindForElementID)
-	for {
-		node, err := s.Next()
-		if errors.Is(err, io.EOF) {
-			return
-		}
-		if err != nil {
-			panic(err)
-		}
-		fmt.Println(node.ID(), node.Kind(), node.Offset())
-		if leaf, ok := node.(*parser.LeafNode); ok {
-			_, _ = s.Payload(leaf)
-		}
-	}
-}
-```
 
 ### `ext/fragment`
 
@@ -297,7 +322,7 @@ import (
 "io"
 
 "github.com/yacchi/ebml/ext/scope"
-"github.com/yacchi/ebml/ext/stream"
+"github.com/yacchi/ebml/stream"
 "github.com/yacchi/ebml/matroska"
 "github.com/yacchi/ebml/parser"
 )
@@ -345,7 +370,7 @@ import (
 	"io"
 
 	"github.com/yacchi/ebml/ext/scope"
-	"github.com/yacchi/ebml/ext/stream"
+	"github.com/yacchi/ebml/stream"
 	"github.com/yacchi/ebml/ext/tags"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
@@ -374,26 +399,6 @@ func main() {
 	}
 }
 ```
-
-### `ext/tree`: two orthogonal access modes
-
-| Mode | Operations | Meaning |
-| --- | --- | --- |
-| Loose extraction | `Descendants` | Containment ignored; every occurrence is returned as a node |
-| Strict structure | `Find` plus `Parent`, `Ancestor`, `Ancestors`, and `Path` | Exact paths and ancestry express containment |
-
-Loose results carry their own structure, so a caller can extract broadly and
-tighten a result later without re-reading the stream. There is no query DSL or
-second index type.
-
-`tree.Marshal` and `tree.MarshalBytes` write a retained tree back out through
-package `writer`, the only EBML encoder in this repository. Parse followed by
-marshal is byte-identical for every committed fixture, with one precondition:
-nothing was elided by a payload cap. Leaf payloads go out verbatim and each
-header is rebuilt at its original size-VINT width — which the retained
-`HeaderLen` still states, so a non-minimal size VINT or a one-byte unknown-size
-marker survives. A round trip over the corpus is therefore a conformance test of
-retention itself.
 
 ## Amazon Kinesis Video Streams: the `kvs` submodule
 
