@@ -3,6 +3,7 @@ package kvs
 import (
 	"encoding/hex"
 	"io"
+	"iter"
 	"maps"
 	"strconv"
 	"time"
@@ -20,7 +21,9 @@ type options struct {
 // Option configures a Reader.
 type Option func(*options)
 
-// WithBufferSize sets the read chunk size (default 64 KiB). A value <= 0 panics.
+// WithBufferSize sets the read chunk size, which defaults to
+// fragment.DefaultReadSize. A value <= 0 panics. It changes read granularity
+// only: assembly is split-invariant, so the fragments are the same either way.
 func WithBufferSize(n int) Option {
 	if n <= 0 {
 		panic("kvs: buffer size must be positive")
@@ -41,14 +44,10 @@ func WithoutTagInheritance() Option {
 
 // Reader pulls one KVS fragment at a time from a raw GetMedia byte stream.
 type Reader struct {
-	source      io.Reader
-	assembler   *fragment.Assembler
-	buffer      []byte
-	queue       []*fragment.Fragment
+	next        func() (*fragment.Fragment, error, bool)
+	stop        func()
 	history     map[string]map[string]string
 	inheritTags bool
-	sourceDone  bool
-	finalized   bool
 	sticky      error
 	returnedEOF bool
 }
@@ -56,16 +55,24 @@ type Reader struct {
 // NewReader reads a raw KVS GetMedia stream — concatenated unknown-size
 // Matroska Segments — from r.
 func NewReader(r io.Reader, opts ...Option) *Reader {
-	o := options{bufferSize: 64 * 1024, inheritTags: true}
+	// A zero bufferSize means "unset": NewReaderSize supplies the default, so the
+	// number lives in exactly one place.
+	o := options{inheritTags: true}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&o)
 		}
 	}
+	// The read loop, the EOF finalization and the "queued fragments first, then the
+	// error" ordering all belong to ext/fragment.Reader; this package adds the KVS
+	// reading of the tags and nothing else. iter.Pull2 is what turns that layer's
+	// iterator back into the Next this package's API is spelled with -- kvs.Next
+	// carries metadata alongside the fragment, which a range loop cannot.
+	src := fragment.NewReaderSize(r, o.bufferSize, o.assemblerOptions...)
+	next, stop := iter.Pull2(src.Fragments())
 	return &Reader{
-		source:      r,
-		assembler:   fragment.New(o.assemblerOptions...),
-		buffer:      make([]byte, o.bufferSize),
+		next:        next,
+		stop:        stop,
 		history:     make(map[string]map[string]string),
 		inheritTags: o.inheritTags,
 	}
@@ -74,56 +81,33 @@ func NewReader(r io.Reader, opts ...Option) *Reader {
 // Next returns the next completed fragment and its metadata. It returns io.EOF,
 // and only io.EOF, when the stream ended cleanly.
 //
-// A FAILURE NEVER DISCARDS THE FRAGMENTS THAT PRECEDED IT. The assembler returns
-// its error together with whatever it had assembled -- including, at EOF, the
-// Cluster that a stream cut mid-element left open, which arrives marked
-// fragment.Fragment.Truncated. Those fragments are delivered by the calls that
-// follow, and the error is reported once they run out, so a dropped GetMedia
-// connection costs the caller only the bytes that never arrived. Once reported the
-// error is sticky, exactly as before.
+// A FAILURE NEVER DISCARDS THE FRAGMENTS THAT PRECEDED IT -- including, at EOF,
+// the Cluster that a stream cut mid-element left open, which arrives marked
+// fragment.Fragment.Truncated. That ordering is ext/fragment.Reader's, not
+// restated here: the fragments are delivered by the calls that follow and the
+// error is reported once they run out, so a dropped GetMedia connection costs the
+// caller only the bytes that never arrived. Once reported the error is sticky.
 func (r *Reader) Next() (*fragment.Fragment, Metadata, error) {
 	var zero Metadata
 	if r.returnedEOF {
 		return nil, zero, io.EOF
 	}
-	for len(r.queue) == 0 {
-		if r.sticky != nil {
-			return nil, zero, r.sticky
-		}
-		if r.sourceDone {
-			r.returnedEOF = true
-			return nil, zero, io.EOF
-		}
-		n, err := r.source.Read(r.buffer)
-		if n > 0 {
-			frags, ferr := r.assembler.Feed(r.buffer[:n])
-			r.queue = append(r.queue, frags...)
-			if ferr != nil {
-				// Queued fragments are handed over first; the next loop turn with an
-				// empty queue is where this error is reported.
-				r.sticky = ferr
-				continue
-			}
-		}
-		if err != nil {
-			if err != io.EOF {
-				r.sticky = err
-				continue
-			}
-			r.sourceDone = true
-			if !r.finalized {
-				r.finalized = true
-				frags, ferr := r.assembler.Finalize()
-				r.queue = append(r.queue, frags...)
-				if ferr != nil {
-					r.sticky = ferr
-					continue
-				}
-			}
-		}
+	if r.sticky != nil {
+		return nil, zero, r.sticky
 	}
-	f := r.queue[0]
-	r.queue = r.queue[1:]
+	f, err, ok := r.next()
+	if !ok {
+		// The iterator ended, which is the clean end of the input: everything it had
+		// assembled has already been handed over.
+		r.stop()
+		r.returnedEOF = true
+		return nil, zero, io.EOF
+	}
+	if err != nil {
+		r.sticky = err
+		r.stop()
+		return nil, zero, err
+	}
 	return f, r.metadata(f), nil
 }
 

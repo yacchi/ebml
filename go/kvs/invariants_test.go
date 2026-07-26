@@ -196,8 +196,11 @@ func TestInvariantStickyErrorDoesNotReadAgain(t *testing.T) {
 	_, _, err2 := r.Next()
 	_, _, err3 := r.Next()
 
-	if err1 != sentinel || err2 != sentinel || err3 != sentinel {
-		t.Fatalf("errors = %v, %v, %v; want sentinel every time", err1, err2, err3)
+	// The source's error is wrapped by the layer that owns the read -- as
+	// stream.Stream wraps its own -- so it is matched with errors.Is, never by
+	// identity or message text.
+	if !errors.Is(err1, sentinel) || !errors.Is(err2, sentinel) || !errors.Is(err3, sentinel) {
+		t.Fatalf("errors = %v, %v, %v; want the source's error every time", err1, err2, err3)
 	}
 	if src.count != 1 {
 		t.Fatalf("underlying Read called %d times, want exactly 1 (subsequent Next calls must not read again)", src.count)

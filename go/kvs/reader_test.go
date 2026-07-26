@@ -151,8 +151,9 @@ func TestReaderSourceErrorIsSticky(t *testing.T) {
 	r := NewReader(errorReader{err: sentinel})
 	_, _, first := r.Next()
 	_, _, second := r.Next()
-	if first != sentinel || second != sentinel {
-		t.Fatalf("errors = %v and %v, want same sentinel", first, second)
+	// Wrapped by the layer that owns the read, so matched with errors.Is.
+	if !errors.Is(first, sentinel) || !errors.Is(second, sentinel) {
+		t.Fatalf("errors = %v and %v, want the same source error both times", first, second)
 	}
 }
 

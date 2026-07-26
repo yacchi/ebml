@@ -368,7 +368,51 @@ uses a per-element allowlist.
 `parser.Cursor` and is the worked example of building on the core. It retains generic element nodes,
 decodes `SimpleBlock`s into `Blocks`, and provides metadata and timing helpers:
 `Tag`, `Tags`, `Tracks`, `Track`, `TrackByName`, `TimestampScale`,
-`ClusterTimestamp`, `BlockTime`, `StartTime`, `EndTime`, and `TrackPCM`.
+`ClusterTimestamp`, `BlockTime`, `StartTime`, `EndTime`, `TrackPCM`, and
+`TrackPCMByName`.
+
+There are two entry points, differing in nothing but **who supplies the bytes**,
+and the same options mean the same thing in both:
+
+| Entry point | Supply | Reading surface |
+| --- | --- | --- |
+| `fragment.New(opts...)` | The caller pushes chunks with `Feed`, then calls `Finalize` | `Feed` returns the Fragments that completed |
+| `fragment.NewReader(r, opts...)` | The `Reader` owns an `io.Reader` | `Fragments() iter.Seq2[*Fragment, error]` |
+
+That split is the same one the core makes between `parser.Cursor` and
+`stream.Stream`, for the same reason: a pull has three outcomes where the caller
+feeds the bytes, and only two where the layer owns the source, so the iterator is
+an exact spelling only on the source-owning side. `Reader` therefore has **no
+exported `Next`**, and the end of the input ends the iteration while any other
+failure is yielded once as the final pair — after every Fragment that completed
+before it.
+
+```go
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/yacchi/ebml/ext/fragment"
+)
+
+func main() {
+	for f, err := range fragment.NewReader(os.Stdin).Fragments() {
+		if err != nil {
+			// The fragments that completed before this failure have already
+			// been delivered by the iterations above, including the Cluster a
+			// cut connection left open (Fragment.Truncated).
+			panic(err)
+		}
+		fmt.Println(f.ClusterTimestamp(), len(f.Blocks))
+	}
+}
+```
+
+`NewReaderSize` sets the read chunk size for a caller whose source has a
+granularity of its own; it changes nothing about the Fragments, since assembly is
+split-invariant.
 
 Absolute block time is `(ClusterTimestamp + block.Timecode) * TimestampScale`;
 both operands are in scale units and the relative timecode is signed.
