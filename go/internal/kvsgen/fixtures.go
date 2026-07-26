@@ -657,6 +657,11 @@ func joinLines(lines ...string) string {
 	return out
 }
 
+// connectEpochMillis is connect_real_shape's Cluster Timestamp: the same instant its
+// AWS_KINESISVIDEO_PRODUCER_TIMESTAMP names (1000000000 seconds since the epoch),
+// counted in the milliseconds that defaultTimestampScale makes one tick.
+const connectEpochMillis = 1_000_000_000 * 1_000
+
 func connectRealShape() Fixture {
 	s := newStream()
 	s.ebmlHeader()
@@ -675,7 +680,15 @@ func connectRealShape() Fixture {
 			tagPair{"AWS_KINESISVIDEO_SERVER_TIMESTAMP", "1000000000.000"},
 			tagPair{"AWS_KINESISVIDEO_PRODUCER_TIMESTAMP", "1000000000.000"},
 		)
-		s.unknownTwoTrackCluster(0,
+		// The Cluster's Timestamp is EPOCH-BASED, which is what Amazon Connect sends
+		// and the one thing this fixture used to get wrong: it declared 0 while its
+		// own PRODUCER_TIMESTAMP said 1000000000, so the fixture described a stream
+		// whose media began 31 years before its producer timestamped it. A corpus
+		// that models a timeline origin the field never uses validates the
+		// assumption, not the world -- the same defect as building every Cluster
+		// known-size. With defaultTimestampScale (1 ms per tick) the tick count is
+		// the producer timestamp in milliseconds.
+		s.unknownTwoTrackCluster(connectEpochMillis,
 			struct {
 				track uint64
 				block
@@ -714,7 +727,9 @@ func connectRealShape() Fixture {
 			"identity/audio tags, then fragment number and server/producer timestamps.",
 			"The Cluster carries four SimpleBlocks, two per named track. Two more separate",
 			"Tags elements appear after the Cluster; MILLIS_BEHIND_NOW and CONTINUATION_TOKEN",
-			"occur ONLY after it. All values are fabricated synthetic data.",
+			"occur ONLY after it. The Cluster Timestamp is EPOCH-BASED, as Connect sends it,",
+			"and names the same instant as PRODUCER_TIMESTAMP. All values are fabricated",
+			"synthetic data.",
 		),
 		Data: data,
 		Facts: Facts{
@@ -729,7 +744,7 @@ func connectRealShape() Fixture {
 			ContactIDs:         []string{fakeContactA},
 			ProducerTimestamps: []string{"1000000000.000"},
 			FragmentNumbers:    []string{"connect-real-0"},
-			Notes:              "Segment-level Tags appear both before and after the Cluster; AWS_KINESISVIDEO_MILLIS_BEHIND_NOW and AWS_KINESISVIDEO_CONTINUATION_TOKEN occur ONLY after it.",
+			Notes:              "Segment-level Tags appear both before and after the Cluster; AWS_KINESISVIDEO_MILLIS_BEHIND_NOW and AWS_KINESISVIDEO_CONTINUATION_TOKEN occur ONLY after it. The Cluster Timestamp is epoch-based (1000000000000 ticks of 1 ms), naming the same instant as PRODUCER_TIMESTAMP, so a consumer reading it as an elapsed media time is visibly wrong here.",
 		},
 	}
 }

@@ -397,8 +397,13 @@ The core is working and tested:
   partial `Tags` element missing its identity keys), `two_tracks` (one
   `Cluster` carrying `SimpleBlock`s for two named audio tracks),
   `known_size_cluster` (legal Matroska but not KVS), and
-  `connect_real_shape` (the real two-before/two-after Tags layout). Golden
-  traces are replayed under all split patterns.
+  `connect_real_shape` (the real two-before/two-after Tags layout, with an
+  EPOCH-BASED `Cluster.Timestamp` naming the same instant as its
+  `PRODUCER_TIMESTAMP` — it declared 0 until that was found to model a timeline
+  origin the field never sends, the same defect class as F5's known-size
+  `Cluster`; the other fixtures keep a zero-based timeline on purpose, since
+  Matroska fixes no origin and a file does start at zero). Golden traces are
+  replayed under all split patterns.
 
 Leaf decoding helpers, `ParseSimpleBlock` and its inverse
 `(*parser.SimpleBlock).Append` are convenience functionality in `parser`; they do

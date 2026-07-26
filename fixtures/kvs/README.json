@@ -19,8 +19,8 @@
       "fragment_numbers": [
         "connect-real-0"
       ],
-      "bytes": 1198,
-      "notes": "Segment-level Tags appear both before and after the Cluster; AWS_KINESISVIDEO_MILLIS_BEHIND_NOW and AWS_KINESISVIDEO_CONTINUATION_TOKEN occur ONLY after it."
+      "bytes": 1202,
+      "notes": "Segment-level Tags appear both before and after the Cluster; AWS_KINESISVIDEO_MILLIS_BEHIND_NOW and AWS_KINESISVIDEO_CONTINUATION_TOKEN occur ONLY after it. The Cluster Timestamp is epoch-based (1000000000000 ticks of 1 ms), naming the same instant as PRODUCER_TIMESTAMP, so a consumer reading it as an elapsed media time is visibly wrong here."
     },
     "false_ebml_magic_in_pcm": {
       "description": "SimpleBlock PCM embeds the EBML magic; must not mis-split.",

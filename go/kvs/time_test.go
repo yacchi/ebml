@@ -64,6 +64,37 @@ func TestStartAndEndTimeSpanTheBlocks(t *testing.T) {
 	}
 }
 
+// TestConnectShapeAgreesWithProducerTimestamp is the field-shape case these
+// functions exist for: connect_real_shape carries an EPOCH-BASED Cluster Timestamp,
+// as Amazon Connect sends, so the fragment's own time and the producer's tag name
+// the same instant. Reading the Cluster Timestamp as an elapsed media time -- which
+// is what ext/fragment's duration accessors return, correctly, for a timeline whose
+// origin it cannot know -- puts the fragment 31 years from its tag.
+func TestConnectShapeAgreesWithProducerTimestamp(t *testing.T) {
+	r := NewReader(bytes.NewReader(fixture(t, "connect_real_shape")))
+	f, m, err := r.Next()
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	if m.ProducerTimestamp.IsZero() {
+		t.Fatal("fixture has no producer timestamp to compare against")
+	}
+	if got := ClusterTime(f); !got.Equal(m.ProducerTimestamp) {
+		t.Fatalf("ClusterTime = %v, want the producer timestamp %v", got, m.ProducerTimestamp)
+	}
+	// The first block sits at the Cluster's own instant, the last 10 ms later.
+	if got := StartTime(f); !got.Equal(m.ProducerTimestamp) {
+		t.Fatalf("StartTime = %v, want %v", got, m.ProducerTimestamp)
+	}
+	if got, want := EndTime(f).Sub(StartTime(f)), 10*time.Millisecond; got != want {
+		t.Fatalf("EndTime - StartTime = %v, want %v", got, want)
+	}
+	// A duration read as an instant is the failure this fixture now makes visible.
+	if asDuration := f.StartTime(); asDuration < 24*time.Hour {
+		t.Fatalf("core StartTime = %v; the fixture no longer models an epoch-based timeline", asDuration)
+	}
+}
+
 func TestBlockTimeMatchesTheCoreDuration(t *testing.T) {
 	f := firstFragment(t, "scaled_timestamps")
 	for i, b := range f.Blocks {
