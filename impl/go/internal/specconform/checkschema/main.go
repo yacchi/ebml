@@ -16,6 +16,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/yacchi/ebml/impl/go/internal/specconform"
@@ -27,35 +28,47 @@ func (p *schemaPaths) String() string     { return fmt.Sprint(*p) }
 func (p *schemaPaths) Set(v string) error { *p = append(*p, v); return nil }
 
 func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// run holds everything but the exit call, so the exit codes this tool is read by
+// -- 1 for a defect, 2 for a usage or input failure -- are testable. It is the
+// same seam cmd/ebml uses.
+func run(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("checkschema", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	var paths schemaPaths
-	flag.Var(&paths, "schema", "path to an EBML Schema XML document (repeatable)")
-	verbose := flag.Bool("v", false, "list the declared divergences as well as the defects")
-	missing := flag.Bool("missing", false, "list the schema elements the registry does not know")
-	flag.Parse()
+	fs.Var(&paths, "schema", "path to an EBML Schema XML document (repeatable)")
+	verbose := fs.Bool("v", false, "list the declared divergences as well as the defects")
+	missing := fs.Bool("missing", false, "list the schema elements the registry does not know")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 
 	if len(paths) == 0 {
-		fmt.Fprintln(os.Stderr, "checkschema: at least one -schema is required")
-		flag.Usage()
-		os.Exit(2)
+		fmt.Fprintln(stderr, "checkschema: at least one -schema is required")
+		fs.Usage()
+		return 2
 	}
 
 	schemas := make([]*specconform.Schema, 0, len(paths))
 	for _, path := range paths {
 		schema, err := specconform.LoadSchema(path)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "checkschema: %v\n", err)
-			os.Exit(2)
+			fmt.Fprintf(stderr, "checkschema: %v\n", err)
+			return 2
 		}
 		schemas = append(schemas, schema)
 	}
 
 	report := specconform.Check(schemas...)
-	report.WriteText(os.Stdout, *verbose)
+	report.WriteText(stdout, *verbose)
 	if *missing {
-		fmt.Println()
-		report.WriteMissing(os.Stdout)
+		fmt.Fprintln(stdout)
+		report.WriteMissing(stdout)
 	}
 	if report.Mismatches() > 0 {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
