@@ -1,8 +1,8 @@
 # ebml
 
 `ebml` is a streaming, cursor-based EBML/Matroska library for Go 1.25. Go 1.25
-is the supported toolchain baseline; the optional range-over-events convenience
-uses the standard-library `iter` support. The portable core emits element events
+is the supported toolchain baseline; the source-owning driver's range-over-events
+surface uses the standard-library `iter` support. The portable core emits element events
 as bytes arrive; it does not require a document tree or buffer bulk payloads. A known-size `Cluster` therefore closes
 as soon as its declared bytes are consumed, even inside an unknown-size
 `Segment`.
@@ -116,10 +116,11 @@ func main() {
 
 `Next` reports three outcomes a consumer must tell apart: `NeedMoreData` (feed the
 next chunk, or `Finalize` when the input is over), `io.EOF` (the stream ended
-cleanly), and a structural failure. A `Nodes` iterator is offered as optional
-sugar, but it is not the normative shape: a plain `range` loop cannot distinguish
-"the next chunk is due" from "the input is over", and that distinction is
-normative for incremental input.
+cleanly), and a structural failure. The cursor therefore offers no iterator: a
+`range` loop carries two outcomes and cannot distinguish "the next chunk is due"
+from "the input is over", and that distinction is normative for incremental input.
+An iterator belongs to the layer that owns the byte source and has already
+answered `NeedMoreData` — that is [`stream`](#stream), below.
 
 A node is valid only until the next `Next` call (and `Finalize`, which also advances
 the cursor); read what you need, or copy the node, before pulling again. Every

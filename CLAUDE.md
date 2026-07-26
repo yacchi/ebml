@@ -102,9 +102,13 @@ carries no meaning.
   caches the payload's extent and never the slice it handed out, and the bytes are
   valid only until the next `Next` and must not be modified — a consumer that
   retains them (`ext/fragment` does) copies them itself.
-* Iterator sugar (`Cursor.Nodes`) may exist but is NOT the normative shape: a range
-  loop cannot distinguish need-more-data from end of input, and that distinction is
-  this library's central semantic. Keep it explicit in `Next`.
+* `parser.Cursor` offers NO iterator, and never will. It had one (`Cursor.Nodes`),
+  documented as non-normative sugar, and it was removed once `stream` proved the
+  arity rule above: a range loop over a caller-fed cursor cannot distinguish
+  need-more-data from end of input, which is this library's central semantic, and
+  it had zero consumers while costing a "not the normative shape" caveat in three
+  documents. The pull stays `Next`. `Cursor.Err` remains, because it REPORTS and
+  never advances — an accessor is not a second spelling of the pull.
 * The answer to `NeedMoreData` lives in exactly one place, `go/stream`, because
   only the holder of the input source can give it. A consumer that pushes bytes
   itself still sees `NeedMoreData` from `parser.Cursor`; that low-level contract
@@ -117,8 +121,9 @@ carries no meaning.
   `stream` is the working proof of the arity rule above, not merely its
   description. The end of the input ends the iteration; every other failure is
   yielded once, as the final pair, with a nil node, so a consumer cannot lose it
-  by forgetting a separate `Err` call the way `Cursor.Nodes` allows. Never add a
-  `Stream.Next` back, and never soften `Nodes` to an `iter.Seq` plus `Err`.
+  by forgetting a separate `Err` call — which is exactly how the removed
+  `Cursor.Nodes` could lose one. Never add a `Stream.Next` back, and never soften
+  `Nodes` to an `iter.Seq` plus `Err`.
 * `parser.Parser` stays exported as the low-level engine: `internal/ebmltrace` needs
   operation-level control to produce the golden traces, and the goldens are the
   conformance corpus.
@@ -272,7 +277,8 @@ carries no meaning.
 The core is working and tested:
 
 * `go/parser` provides incremental cursor primitives and the token pull loop
-  `Cursor.Next`/`Feed`/`Finalize`, with `Nodes` as non-normative iterator sugar.
+  `Cursor.Next`/`Feed`/`Finalize`, and no iterator: an iterator belongs to the
+  layer that owns the byte source, which is `go/stream`.
   `Next` returns distinguishable master-start, leaf, and master-end nodes; a node
   carries ID, depth, offset, header length, declared size and end offset. Flow
   control is decided on each node before the next `Next`; payload requests can
@@ -356,7 +362,7 @@ element around it is still written by `go/writer`.
 ## Roadmap
 
 Writing and round-trip conformance are complete. The pull cursor, its lazy flow
-control, iterator caveat, and Go extensions are documented; remaining work is
+control, iterator placement, and Go extensions are documented; remaining work is
 focused on broader reading conformance and Matroska coverage:
 
 1. CRC-32 is DONE on both sides and is not a parser feature: the primitive is

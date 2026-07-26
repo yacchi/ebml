@@ -329,12 +329,13 @@ reproduce the delivered bytes, and a consumer that modifies them must not be abl
 alter the reader's state.
 
 > **Go mapping (non-normative):** `parser.Cursor` with `Next`, `Feed`, `Finalize`,
-> `Offset`, `Depth`, `Unconsumed`, `Err`, and the `Nodes` iterator. The event is a
+> `Offset`, `Depth`, `Unconsumed` and `Err`, and no iterator: a range loop cannot
+> distinguish need-more-data from end of input, and that distinction is normative
+> here, so `Next` keeps it explicit. `Err` reports the last such outcome without
+> advancing. The event is a
 > closed `parser.Node` interface over `*MasterNode` (`Descend`, `Skip`), `*LeafNode`
 > (`Payload`, `Skip`) and `*EndNode` (`Start`), so an operation invalid for an event
-> cannot be written: a leaf payload cannot be requested from a master. The iterator
-> is sugar only — a range loop cannot distinguish need-more-data from end of input,
-> and that distinction is normative here, so `Next` keeps it explicit. The
+> cannot be written: a leaf payload cannot be requested from a master. The
 > classifier's verdict is `Node.Kind`, a `parser.Kind` on all three variants
 > (`KindEndMaster` on an `*EndNode`); a consumer decoding a payload takes its value
 > type from `matroska.TypeFor` instead. Invalidation is

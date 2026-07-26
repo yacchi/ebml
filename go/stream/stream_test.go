@@ -139,35 +139,47 @@ func TestExhaustedStreamYieldsNothing(t *testing.T) {
 	}
 }
 
-// TestBreakResumes pins the documented resumption rule: a loop that breaks leaves
-// the stream on the node it broke on, and ranging again continues after it.
-func TestBreakResumes(t *testing.T) {
-	s := stream.New(bytes.NewReader(testDocument()), matroska.KindForElementID)
+// TestBreakResumesAtEveryNode pins the documented resumption rule, exhaustively:
+// for every node index in turn it breaks out of the range there, resumes with a
+// fresh range, and requires the concatenated sequence to equal the uninterrupted
+// one. Breaking out of a range-over-func loop must therefore leave the stream
+// exactly where it stopped, including the decision left on the node it broke on.
+//
+// This is the rigour the deleted parser.Cursor.Nodes test used to carry; the
+// property belongs to whichever layer actually offers an iterator, and since
+// stream is now the only one, it is tested here.
+func TestBreakResumesAtEveryNode(t *testing.T) {
 	all := collectNodes(t, stream.New(bytes.NewReader(testDocument()), matroska.KindForElementID))
-
-	var seen []nodeShape
-	for node, err := range s.Nodes() {
-		if err != nil {
-			t.Fatal(err)
-		}
-		seen = append(seen, shape(node))
-		if len(seen) == 2 {
-			break
-		}
-	}
-	for node, err := range s.Nodes() {
-		if err != nil {
-			t.Fatal(err)
-		}
-		seen = append(seen, shape(node))
+	if len(all) < 2 {
+		t.Fatalf("test document has %d nodes, too few to break within", len(all))
 	}
 
-	if len(seen) != len(all) {
-		t.Fatalf("resumed node count = %d, want %d", len(seen), len(all))
-	}
-	for i := range all {
-		if seen[i] != all[i] {
-			t.Errorf("node %d = %+v, want %+v", i, seen[i], all[i])
+	for k := range all {
+		s := stream.New(bytes.NewReader(testDocument()), matroska.KindForElementID)
+		var seen []nodeShape
+		for node, err := range s.Nodes() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			seen = append(seen, shape(node))
+			if len(seen) == k+1 {
+				break
+			}
+		}
+		for node, err := range s.Nodes() {
+			if err != nil {
+				t.Fatal(err)
+			}
+			seen = append(seen, shape(node))
+		}
+
+		if len(seen) != len(all) {
+			t.Fatalf("breaking after node %d yielded %d nodes, want %d", k, len(seen), len(all))
+		}
+		for i := range all {
+			if seen[i] != all[i] {
+				t.Fatalf("breaking after node %d, node %d = %+v, want %+v", k, i, seen[i], all[i])
+			}
 		}
 	}
 }

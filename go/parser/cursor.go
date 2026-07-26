@@ -3,7 +3,6 @@ package parser
 import (
 	"fmt"
 	"io"
-	"iter"
 )
 
 // BoundaryFunc decides where an unknown-size master ends. It is asked, on the
@@ -831,48 +830,20 @@ func (c *Cursor) runEOF() error {
 	return nil
 }
 
-// Err reports why iteration stopped, which is what the Nodes iterator cannot
-// return by itself:
+// Err restates why the cursor last stopped, for a consumer that has moved past
+// the error Next returned:
 //
-//   - nil when the consumer broke out of the loop, or before the first event.
+//   - nil before the first event.
 //   - NeedMoreData when the bytes fed are exhausted: feed more, or Finalize, and
-//     range again to resume exactly where the loop stopped.
+//     call Next again to resume exactly where it stopped.
 //   - io.EOF when the stream ended cleanly after Finalize.
 //   - a structural failure otherwise, for which IsStructural is true.
 //
-// That NeedMoreData and io.EOF are distinct is the whole reason Nodes is sugar and
-// not the normative shape: a for-range loop cannot tell "the next chunk is due"
-// from "the input is over", and for a reader whose input arrives in chunks that is
-// the central distinction. Next keeps it explicit.
+// It reports; it never advances. Next remains the only way to acquire an event,
+// and that NeedMoreData and io.EOF are distinct values of this error is the
+// distinction the whole reading surface is shaped around: a reader whose input
+// arrives in chunks must tell "the next chunk is due" from "the input is over".
 func (c *Cursor) Err() error { return c.lastErr }
-
-// Nodes ranges over the events, ending as soon as Next reports any error; Err then
-// says which one. It is sugar over Next for the common shape:
-//
-//	for node := range c.Nodes() {
-//	    ...
-//	}
-//	if err := c.Err(); parser.IsStructural(err) {
-//	    return err
-//	}
-//
-// Breaking out of the loop leaves the cursor exactly where it stopped, so ranging
-// again resumes with the following event: the loop that broke has seen the node it
-// broke on, and the decision left on that node is carried out when iteration
-// resumes.
-func (c *Cursor) Nodes() iter.Seq[Node] {
-	return func(yield func(Node) bool) {
-		for {
-			n, err := c.Next()
-			if err != nil {
-				return
-			}
-			if !yield(n) {
-				return
-			}
-		}
-	}
-}
 
 func (c *Cursor) fail(err error) error {
 	c.err = err

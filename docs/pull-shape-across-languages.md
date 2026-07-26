@@ -93,9 +93,13 @@ for node, err := range s.Nodes() { // stream.Stream: it owns the io.Reader
 failure cannot be lost by forgetting the second call. End of input ends the
 range; any other failure is yielded once, as the final pair, with a nil node.
 
-`parser.Cursor` also has a `Nodes` iterator, and it is explicitly non-normative
-sugar for exactly the reason above: it swallows the distinction. It exists for
-loops that have already established there is nothing more to feed.
+`parser.Cursor` deliberately has no iterator. It had one, offered as
+non-normative sugar, and it was removed: a range loop over a caller-fed cursor
+swallows the distinction above, and once `stream` existed the sugar had no
+consumers left while still costing a "not the normative shape" caveat wherever
+the reading surface was described. `Cursor.Err` remains, because it reports the
+last outcome without advancing — an accessor is not a second spelling of the
+pull.
 
 ### Rust
 
