@@ -8,7 +8,7 @@ classifier, the retained element model, and the byte-supply contract a
 source-owning driver honours.
 
 A package belongs to that core when a port must agree on it to interoperate.
-Ways of USING the core -- the packages under `go/ext/` -- are outside this
+Ways of USING the core -- the packages under `impl/go/ext/` -- are outside this
 contract, and another language may shape them differently or omit them.
 
 ## Relation to existing models
@@ -657,7 +657,7 @@ This requirement also asserts that the retained model is lossless, including
 the original legal size-VINT width and the exact payload bytes. Reading-only
 ports remain conformant without implementing this requirement.
 
-The packages under `go/ext/` are outside this contract. `scope`, `tags`, and
+The packages under `impl/go/ext/` are outside this contract. `scope`, `tags`, and
 `fragment` are ways of using the core and are Go-only convenience layers whose
 shape another language may choose differently. The retained element model is
 specified above.

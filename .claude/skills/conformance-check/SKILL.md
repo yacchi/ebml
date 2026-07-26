@@ -1,11 +1,11 @@
 ---
 name: conformance-check
-description: Check the hand-written go/matroska registry against the official IETF CELLAR EBML Schema documents. Fetches the schemas on demand (they are never vendored), runs internal/specconform, and turns the result into defects to fix and coverage to add. Use when broadening Matroska element coverage, after editing go/matroska/elements.go or the containment lists, or when asked for a spec conformance / 適合性チェック.
+description: Check the hand-written impl/go/matroska registry against the official IETF CELLAR EBML Schema documents. Fetches the schemas on demand (they are never vendored), runs internal/specconform, and turns the result into defects to fix and coverage to add. Use when broadening Matroska element coverage, after editing impl/go/matroska/elements.go or the containment lists, or when asked for a spec conformance / 適合性チェック.
 ---
 
 # Matroska/EBML conformance check
 
-The registry in `go/matroska` is hand-written on purpose. This skill is what
+The registry in `impl/go/matroska` is hand-written on purpose. This skill is what
 keeps it honest: it compares the registry against the normative machine-readable
 schemas and separates two very different results.
 
@@ -22,7 +22,7 @@ schemas and separates two very different results.
   cache, use them, leave them there.
 * Never copy schema prose. Element `<documentation>` text is the part CC-BY
   actually covers; IDs, names, types and paths are interoperability facts.
-  Doc comments in `go/matroska` are written from scratch, in this repository's
+  Doc comments in `impl/go/matroska` are written from scratch, in this repository's
   own voice.
 * Do not generate `elements.go`. The omissions are deliberate (see the
   containment invariant below), and generation would erase the intent.
@@ -56,9 +56,9 @@ underlying specifications are RFC 8794 (EBML) and RFC 9559 (Matroska).
 ## 2. Run the check
 
 ```bash
-go -C go run ./internal/specconform/checkschema \
-  -schema ../.spec-cache/ebml.xml \
-  -schema ../.spec-cache/ebml_matroska.xml
+go -C impl/go run ./internal/specconform/checkschema \
+  -schema ../../.spec-cache/ebml.xml \
+  -schema ../../.spec-cache/ebml_matroska.xml
 ```
 
 Both schemas are needed: `ebml.xml` declares the EBML header elements and
@@ -103,7 +103,7 @@ claiming the element is deprecated.
 **Then coverage.** Extend the registry one master at a time, in the grouping
 `-missing` prints:
 
-1. Add the `ID…` constant in `go/matroska/elements.go`, ordered as the
+1. Add the `ID…` constant in `impl/go/matroska/elements.go`, ordered as the
    surrounding block is.
 2. Add the `elements` entry with the ValueType the schema's type maps to
    (`uinteger`→`TypeUint`, `utf-8`→`TypeUTF8`, `string`→`TypeString`,
@@ -116,7 +116,7 @@ claiming the element is deprecated.
    changes.
 5. Write the doc comment yourself. Do not paste the schema's documentation.
 
-Re-run the check, then `go -C go test ./...` and `go -C go vet ./...`.
+Re-run the check, then `go -C impl/go test ./...` and `go -C impl/go vet ./...`.
 
 ## 4. Report
 
@@ -151,5 +151,5 @@ feature first; the check then follows for free.
 * The Matroska test files (`ietf-wg-cellar/matroska-test-files`, ~185 MB, no
   license statement in the repository) are not used here. Real-file validation
   is a separate, opt-in exercise.
-* `matroska_tags.xml` (the official tag definitions) is not checked; `go/integrations/kvs`
+* `matroska_tags.xml` (the official tag definitions) is not checked; `impl/go/integrations/kvs`
   carries vendor tag knowledge that has no schema counterpart.

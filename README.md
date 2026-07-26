@@ -43,10 +43,10 @@ No third-party dependencies, in any implementation.
 Go is the only implementation today. Each implementation carries its own quick
 start; this is its shortest form, and everything else about it — installation into
 a workspace, the package map, the extensions, writing — is in
-[`go/README.md`](go/README.md).
+[`impl/go/README.md`](impl/go/README.md).
 
 ```bash
-go get github.com/yacchi/ebml
+go get github.com/yacchi/ebml/impl/go
 ```
 
 ```go
@@ -56,9 +56,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/yacchi/ebml/matroska"
-	"github.com/yacchi/ebml/parser"
-	"github.com/yacchi/ebml/stream"
+	"github.com/yacchi/ebml/impl/go/matroska"
+	"github.com/yacchi/ebml/impl/go/parser"
+	"github.com/yacchi/ebml/impl/go/stream"
 )
 
 func main() {
@@ -111,12 +111,12 @@ when the first element that cannot be its child arrives.
 Where to go next:
 
 * **Reading a live KVS or Amazon Connect stream** →
-  [`go/README.md`, the `kvs` submodule](go/README.md#amazon-kinesis-video-streams-the-kvs-submodule)
+  [`impl/go/README.md`, the `integrations/kvs` module](impl/go/README.md#amazon-kinesis-video-streams-the-integrationskvs-module)
 * **Assembling fragments from any Matroska stream** →
-  [`go/README.md`, `ext/fragment`](go/README.md#extfragment)
+  [`impl/go/README.md`, `ext/fragment`](impl/go/README.md#extfragment)
 * **Writing EBML, or round-tripping a document** →
-  [`go/README.md`, Writing](go/README.md#writing)
-* **Just looking at a file** → [`go/README.md`, CLI](go/README.md#cli)
+  [`impl/go/README.md`, Writing](impl/go/README.md#writing)
+* **Just looking at a file** → [`impl/go/README.md`, CLI](impl/go/README.md#cli)
 
 ## What it is not
 
@@ -135,11 +135,15 @@ Where to go next:
 Usage, API spelling, package layout and commands are per implementation, and each
 one documents its own:
 
+Every implementation lives under `impl/`, one directory per language, so the
+repository root holds the things they SHARE — the corpus, the spec, the notes —
+and adding a language never rearranges it.
+
 | Directory | Language | State | Documentation |
 | --- | --- | --- | --- |
-| [`go/`](go/) | Go | Complete: reading, writing, round-trip conformance, CLI | [`go/README.md`](go/README.md) |
-| `ts/` | — | Placeholder. Not an implementation. | — |
-| `py/` | — | Placeholder. Not an implementation. | — |
+| [`impl/go/`](impl/go/) | Go | Complete: reading, writing, round-trip conformance, CLI | [`impl/go/README.md`](impl/go/README.md) |
+| `impl/ts/` | — | Placeholder. Not an implementation. | — |
+| `impl/py/` | — | Placeholder. Not an implementation. | — |
 
 This file stays language-neutral apart from the quick start, which belongs to
 whichever implementations exist: what the library is, what the contract is, and
@@ -184,6 +188,6 @@ Apache-2.0 (`SPDX-License-Identifier: Apache-2.0`). See [LICENSE](LICENSE).
 
 This project is not affiliated with, endorsed by, or sponsored by Amazon Web
 Services. The fixture corpus and the runnable example under
-[`go/integrations/kvs/examples/getmedia`](go/integrations/kvs/examples/getmedia) are written for use with
+[`impl/go/integrations/kvs/examples/getmedia`](impl/go/integrations/kvs/examples/getmedia) are written for use with
 Amazon Kinesis Video Streams; that service name appears here descriptively only,
 and all fixture data is synthetic.

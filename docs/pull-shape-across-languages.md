@@ -50,7 +50,7 @@ So the test for a port is **not** "does it avoid iterators". It is:
 | The bytes come from | Where need-more-data goes | Iterator? |
 | --- | --- | --- |
 | the caller, pushed in (`parser.Cursor`) | nowhere — it must be visible | **no**, unless the protocol has a third state |
-| the layer itself, which owns the source (`go/stream`) | absorbed by blocking or `await` | **yes** — only two outcomes remain |
+| the layer itself, which owns the source (`impl/go/stream`) | absorbed by blocking or `await` | **yes** — only two outcomes remain |
 
 That is the whole rule. The lower layer keeps an explicit acquire operation
 because it has three things to say. The driver above it has already answered

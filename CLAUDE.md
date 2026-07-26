@@ -1,35 +1,54 @@
 # CLAUDE.md - ebml
 
 This repository is English-only. It is a streaming, cursor-based EBML/Matroska
-library for Go 1.25, rooted at `go/` and published as
-`github.com/yacchi/ebml`. The CLI binary is `ebml` (`go/cmd/ebml`). The
+library for Go 1.25, rooted at `impl/go/` and published as
+`github.com/yacchi/ebml/impl/go`. The CLI binary is `ebml` (`impl/go/cmd/ebml`). The
 repository directory is still named `ebml-reader`; that is intentional and
 carries no meaning.
 
+EVERY IMPLEMENTATION LIVES UNDER `impl/`, one directory per language, and the
+repository root holds only what implementations SHARE — the corpus, the spec,
+the notes — so a new language never rearranges it. The module path FOLLOWS from
+that layout rather than being chosen against it: the go tool resolves a
+`github.com/...` path as the first two elements being the repository and the
+REST BEING THE SUBDIRECTORY, so a module at `impl/go` can only be
+`github.com/yacchi/ebml/impl/go`. It was `github.com/yacchi/ebml` while the
+module sat in `go/`, which no `go get` could ever have resolved. Neither escape
+was taken: a vanity domain buys a shorter path with a permanent hosting
+dependency, in a library whose whole claim is zero third-party requires, and
+splitting the Go module into its own repository would put the corpus on one side
+of a repository boundary and half its consumers on the other. The directories are
+named for the LANGUAGE ALONE (`impl/go`, not `impl/go-ebml`): inside a repository
+named `ebml` the suffix repeats itself, and it would repeat in every consumer's
+import line forever. Because the modules are in subdirectories, their version
+tags carry the subdirectory as a prefix — `impl/go/v0.1.0` and
+`impl/go/integrations/kvs/v0.1.0` — and the core is tagged FIRST, since the
+integration's `replace` comes out only once the core resolves.
+
 ## Architecture and standing design rules
 
-* The CORE is `go/parser`, `go/matroska`, `go/writer`, `go/tree`, `go/stream`
-  and `go/crc`: membership is decided by whether a PORT MUST AGREE ON IT TO
+* The CORE is `impl/go/parser`, `impl/go/matroska`, `impl/go/writer`, `impl/go/tree`, `impl/go/stream`
+  and `impl/go/crc`: membership is decided by whether a PORT MUST AGREE ON IT TO
   INTEROPERATE, not by how generic the code looks. The cursor, event model, flow
   control, VINT behavior, element registry, retained element model, encoder, and
   the byte-supply contract are that agreement and are specified in
   `spec/SPEC.md`. Ways of USING them belong in `ext`, where another language may
   reasonably choose a different shape or none at all.
-  `go/crc` is core because WHICH BYTES a CRC-32 covers and which way round the
+  `impl/go/crc` is core because WHICH BYTES a CRC-32 covers and which way round the
   four are stored are agreements, not implementation details: a port that covers
   the parent's header, or that includes the CRC-32 element in its own coverage,
   or that stores the value big-endian, still writes a self-consistent file, and
   that file reads as damaged here — a mismatch on bytes nothing ever damaged. It
   imports nothing from this module because `internal/archtest` confines
-  `go/writer` to `go/parser`, so the one primitive both the writer and `tree`
+  `impl/go/writer` to `impl/go/parser`, so the one primitive both the writer and `tree`
   need has to sit BELOW both; anywhere else forces a second copy.
-  `go/stream` is core for the reason its own doc gives: `io.Reader` is Go's
+  `impl/go/stream` is core for the reason its own doc gives: `io.Reader` is Go's
   SPELLING of a byte source, but the contract it stands for is not Go's -- keep
   supplying bytes and parsing proceeds, and an exhausted source is finalized so a
   document that ended mid-element is reported as truncated. A port that skipped
   that last half would silently accept a truncated document, which is exactly the
   kind of disagreement the contract exists to prevent.
-* Everything under `go/ext/` is optional Go convenience built solely on exported
+* Everything under `impl/go/ext/` is optional Go convenience built solely on exported
   core API. If an extension needs an unavailable capability, fix the core; do
   not reach into internals or add a workaround in the extension. An extension
   may reasonably have a different shape, or no equivalent, in another language.
@@ -56,7 +75,7 @@ carries no meaning.
   where the caller pushes bytes (`parser.Cursor`) need-more-data has nowhere to
   go, so the operation stays an explicit call — Rust's `futures::Stream` PASSES
   the test, since `Poll::Pending` IS need-more-data, while a plain `Iterator`
-  does not; where the layer owns the source (`go/stream`) blocking or `await`
+  does not; where the layer owns the source (`impl/go/stream`) blocking or `await`
   absorbs need-more-data, so an iterator is correct there. A port that offers
   only the iterator over a caller-pushed cursor has dropped this library's
   central distinction, whatever else it gets right.
@@ -66,7 +85,7 @@ carries no meaning.
 * `tree` is the core retained document model defined by EBML's tree-shaped
   document; this does not change the parser sanctuary. `parser` is a StAX-shaped
   reader and never imports retained document state or `tree`. The import
-  direction is enforced by `go/internal/archtest`.
+  direction is enforced by `impl/go/internal/archtest`.
 * `ext/scope` is element-agnostic and follows one master by depth regression,
   never by pairing EndNodes, because `MasterNode.Skip` emits no EndNode. It
   retains only directly completed children and has no configuration or lexical
@@ -121,7 +140,7 @@ carries no meaning.
   `ext/tags` applied to `Target{}`, and `ext/tags` imported `ext/scope` for the
   `Read(*scope.Scope)` above. A convenience accessor is exactly how such an edge
   grows back, which is why the rule is a TEST and not a paragraph. A consumer
-  composes the two, as `go/integrations/kvs` does. `ext/fragment` therefore offers NO tag
+  composes the two, as `impl/go/integrations/kvs` does. `ext/fragment` therefore offers NO tag
   accessor: a fragment's tags are `tags.Read(frag.Segment)`, which also stops the
   per-call rebuild the methods hid — five names cost five walks of the Segment
   where one `Set` answers all five. A TEST may still import a sibling ext package
@@ -129,7 +148,7 @@ carries no meaning.
   `ext/tags` reads what `ext/fragment` retains is what such a test is for.
 * A layer that adapts to ONE NAMED OUTSIDE SYSTEM — a hosted service, a
   specification, a container profile — is an INTEGRATION and lives in
-  `go/integrations/<name>/` as its OWN MODULE, never in the core and never in
+  `impl/go/integrations/<name>/` as its OWN MODULE, never in the core and never in
   `ext/`. What defines the layer is that it MAY IMPORT SEVERAL `ext` PACKAGES:
   `integrations/kvs` reads fragments through `ext/fragment` and their tags through
   `ext/tags`, which is exactly the composition the leaf rule above forbids inside
@@ -145,7 +164,7 @@ carries no meaning.
   client and no AWS SDK dependency. That line answers a question a consumer asked
   outright (`plans/KVS-FULL-MIGRATION-REQUIREMENTS.md`, requirement 4), which is
   why it is written down rather than left to inference; moving it means amending
-  `go/integrations/doc.go` first, so the change is a decision on the record and not
+  `impl/go/integrations/doc.go` first, so the change is a decision on the record and not
   one module quietly growing a client. Being separate modules is what keeps a
   dependency, a vocabulary and a release cadence belonging to one outside system
   out of the core's.
@@ -165,14 +184,14 @@ carries no meaning.
   reintroduce instance reuse to save that allocation — a retained pointer would then BE
   the live node and no check could exist, which is the silent corruption the rule
   exists to prevent. The cost is measured, not claimed: exactly one allocation per
-  event (`allocsPerEvent` in `go/parser/node_validity_test.go`), with
+  event (`allocsPerEvent` in `impl/go/parser/node_validity_test.go`), with
   `BenchmarkCursorScan`/`BenchmarkParserScan` pricing it against `parser.Parser`, the
   surface for a consumer that needs no node. Keep that statement identical in `Node`'s
-  doc, `go/README.md` and `spec/SPEC.md` section 3 — never widen the claim in one of
+  doc, `impl/go/README.md` and `spec/SPEC.md` section 3 — never widen the claim in one of
   them.
   A method added to a node type must take the same check (`nodeExtent.fresh`) and is
   covered automatically by the reflection-driven tables in
-  `go/parser/node_validity_test.go`.
+  `impl/go/parser/node_validity_test.go`.
   `LeafNode.Payload` returns a VIEW of the cursor buffer, not a copy: the cursor
   caches the payload's extent and never the slice it handed out, and the bytes are
   valid only until the next `Next` and must not be modified — a consumer that
@@ -184,7 +203,7 @@ carries no meaning.
   it had zero consumers while costing a "not the normative shape" caveat in three
   documents. The pull stays `Next`. `Cursor.Err` remains, because it REPORTS and
   never advances — an accessor is not a second spelling of the pull.
-* The answer to `NeedMoreData` lives in exactly one place, `go/stream`, because
+* The answer to `NeedMoreData` lives in exactly one place, `impl/go/stream`, because
   only the holder of the input source can give it. A consumer that pushes bytes
   itself still sees `NeedMoreData` from `parser.Cursor`; that low-level contract
   stays unchanged, and the two are not alternatives -- `stream` is built on it.
@@ -202,11 +221,11 @@ carries no meaning.
 * `parser.Parser` stays exported as the low-level engine: `internal/ebmltrace` needs
   operation-level control to produce the golden traces, and the goldens are the
   conformance corpus.
-* `go/parser` holds NO element knowledge: no element table and not one element ID
+* `impl/go/parser` holds NO element knowledge: no element table and not one element ID
   literal in its non-test source. All classification comes from the supplied
   `KindClassifier`, which is a REQUIRED argument of `parser.New` and
   `parser.NewCursor` (there is no option form and no built-in default; `nil`
-  panics). Element IDs live only in `go/matroska`. A default would silently read
+  panics). Element IDs live only in `impl/go/matroska`. A default would silently read
   an unlisted master as one opaque leaf, so never reintroduce one.
 * The boundary policy for a stream of concatenated documents lives in exactly ONE
   place, `matroska.StreamBoundary`: a new top-level element ends any open master,
@@ -216,7 +235,7 @@ carries no meaning.
   registry holds a COMPLETE child list for the open master and `next` is a
   built-in, non-global element absent from it, because a false boundary corrupts
   the parse while a missed one only closes later than it could. `ext/fragment`,
-  `go/cmd/ebml` and `internal/ebmltrace` all call it and none restates it. All
+  `impl/go/cmd/ebml` and `internal/ebmltrace` all call it and none restates it. All
   three did once, and each copy went stale on its own schedule: the CLI rendered
   a live stream's trailing `Tags` inside its `Cluster` while the assembler read
   the same bytes correctly, and `ebmltrace` wrote GOLDEN FILES in that same wrong
@@ -243,7 +262,7 @@ carries no meaning.
   known-size master with payload outstanding (`PrematureCloseError`); a
   known-size boundary belongs to the stream and must not be discarded.
   `LeaveMaster` remains the ordinary close at a declared end.
-* `go/writer` is the repository's ONLY EBML encoder. No test, fixture generator or
+* `impl/go/writer` is the repository's ONLY EBML encoder. No test, fixture generator or
   extension may carry an encoder of its own: `internal/kvsgen` builds the corpus
   through it, `tree.Marshal` composes its primitives, and hand-shaped test
   inputs call it too — through `internal/ebmltest`, the ONE shared shaping layer
@@ -256,7 +275,7 @@ carries no meaning.
   return unchanged: a string carrying a NUL byte is rejected, since a reader stops
   at the first NUL.
 * (h) Exactly one EBML encoder exists in the repository: anything that emits
-  bytes uses `go/writer`.
+  bytes uses `impl/go/writer`.
 * (i) The writer holds no element knowledge either; the caller picks the value
   type.
 * (j) Parse-then-marshal is a core contract and stays byte-identical for every
@@ -273,7 +292,7 @@ carries no meaning.
   doubt, only this element's bytes are. Emission is opt-in PER MASTER
   (`writer.WithChecksum`) and the CALLER supplies the CRC-32 element ID, exactly
   as it supplies every other ID — that parameter is what keeps rule (i) intact,
-  since a hard-coded ID would be the first element literal in `go/writer`. And
+  since a hard-coded ID would be the first element literal in `impl/go/writer`. And
   `tree.Marshal` never GENERATES a CRC element: a CRC-bearing input already
   retains it as an ordinary child and writes it back verbatim, so generating one
   would rewrite bytes the document already had and break (j).
@@ -361,7 +380,7 @@ carries no meaning.
   `WithMetadataComplete` is the one escape and takes a CALLER-SUPPLIED predicate,
   exactly as `parser.WithBoundary` takes `matroska.StreamBoundary` — which is why
   `kvs.MetadataComplete` (release on the continuation token GetMedia writes last)
-  lives in `go/integrations/kvs` and `ext/fragment` still knows no tag name. A predicate that
+  lives in `impl/go/integrations/kvs` and `ext/fragment` still knows no tag name. A predicate that
   always returns true IS the old eager emission, which is why there is no second
   option for it; its view is read-size dependent by nature and that is documented
   where it is offered, never hidden.
@@ -395,7 +414,7 @@ carries no meaning.
   against them. What CC-BY actually covers is the schema's PROSE, so no element
   `<documentation>` text is ever copied into a Go doc comment; IDs, names, types
   and paths are interoperability facts and are transcribed by hand.
-  `go/matroska/elements.go` stays HAND-WRITTEN and is never generated: its
+  `impl/go/matroska/elements.go` stays HAND-WRITTEN and is never generated: its
   omissions are deliberate and a generator would erase that intent. The checker
   reads the registry through its EXPORTED API only, so what it validates is the
   behavior a consumer sees, not an internal table that might disagree with it.
@@ -412,9 +431,9 @@ carries no meaning.
 
 The core is working and tested:
 
-* `go/parser` provides incremental cursor primitives and the token pull loop
+* `impl/go/parser` provides incremental cursor primitives and the token pull loop
   `Cursor.Next`/`Feed`/`Finalize`, and no iterator: an iterator belongs to the
-  layer that owns the byte source, which is `go/stream`.
+  layer that owns the byte source, which is `impl/go/stream`.
   `Next` returns distinguishable master-start, leaf, and master-end nodes; a node
   carries ID, depth, offset, header length, declared size and end offset. Flow
   control is decided on each node before the next `Next`; payload requests can
@@ -430,7 +449,7 @@ The core is working and tested:
   `UnknownSizeLeafError`, and `PrematureCloseError` as specified. Every one of
   those failures except `NeedMoreData` satisfies `parser.IsStructural`, while
   `parser.NewContentError` marks a consumer's content verdict as the other class.
-* `go/matroska` is the immutable RFC 9559 registry. `Default`, `NewRegistry`,
+* `impl/go/matroska` is the immutable RFC 9559 registry. `Default`, `NewRegistry`,
   `Register`, `Override`, `Lookup`, `NameForID`, `Describe`, `IDForName`,
   `Elements`, `TypeFor`, `LegalChildren`, `EndsUnknownSizeMaster`, `ValueType`,
   and `KindForElementID` provide standard knowledge and vendor extensibility.
@@ -441,24 +460,24 @@ The core is working and tested:
   names 270 of the schema's 273 elements, checked element by element by
   `internal/specconform`; the three exceptions are the deprecated Cluster
   children and are documented where the containment lists are.
-* `go/tree` retains a generic tree and implements loose `Descendants` and
+* `impl/go/tree` retains a generic tree and implements loose `Descendants` and
   strict `Find`/ancestry navigation. `Marshal`/`MarshalBytes` write a tree back
   out; parse then marshal is BYTE-IDENTICAL for every committed fixture unless a
   payload was elided by a retention cap, because the retained `HeaderLen` still
-  gives each header's original size-VINT width. `go/ext/fragment` assembles one
+  gives each header's original size-VINT width. `impl/go/ext/fragment` assembles one
   `Fragment` per completed `Cluster` by pulling `Cursor.Next` in its own loop,
   using only exported core APIs, with `WithResync` and `WithSkipContentErrors`
   as its two opt-in, per-error-class recovery options. It has two entry points
   differing only in who supplies the bytes — `New`/`Feed` for a caller that
   pushes, and `NewReader`/`Fragments() iter.Seq2[*Fragment, error]` for one that
   hands over an `io.Reader` — and the same options mean the same thing in both.
-* `go/stream` owns an `io.Reader` and answers `NeedMoreData` while driving a
+* `impl/go/stream` owns an `io.Reader` and answers `NeedMoreData` while driving a
   cursor. Its whole reading surface is `Nodes() iter.Seq2[parser.Node, error]`;
   there is no exported `Next`, and `stream` is the working proof of the arity rule
   above. The CLI's private stream driver is gone; `integrations/kvs.Reader` remains a
   byte-oriented assembler driver because it consumes `Assembler.Feed`, not cursor
   nodes.
-* `go/ext/scope` (ext: a way of USING the core, not part of the agreement) tracks any master and the elements that completed directly
+* `impl/go/ext/scope` (ext: a way of USING the core, not part of the agreement) tracks any master and the elements that completed directly
   inside it. It is element-agnostic and unwinds by node-depth regression, never
   by pairing EndNodes, because `MasterNode.Skip` emits no EndNode. Only observed
   nodes exist in a scope, with no configured retain policy or element allowlist;
@@ -466,18 +485,18 @@ The core is working and tested:
   queries. Scopes have no lexical chaining or inheritance: neither EBML nor
   Matroska defines it, so a consumer wanting two levels runs two Trackers and
   states its own precedence.
-* `go/ext/tags` computes target-aware views over observed `Tags` elements.
+* `impl/go/ext/tags` computes target-aware views over observed `Tags` elements.
   Segment-default tags are cumulative and positionless, repeated names are
   last-wins by library choice. It is the only tag-traversal implementation and
   the only place tag accessors live: `ext/fragment` has none of its own.
-* `go/integrations/kvs` is a separate module holding all KVS-specific tag and
+* `impl/go/integrations/kvs` is a separate module holding all KVS-specific tag and
   metadata knowledge; the core module has no KVS element or tag knowledge left.
-  The runnable example is `go/integrations/kvs/examples/getmedia`. `Reader.Next`
+  The runnable example is `impl/go/integrations/kvs/examples/getmedia`. `Reader.Next`
   reports in-band `*StreamError`s itself, the same Reader reads the finite
   `GetMediaForFragmentList` payload as it reads a live one, and `MetadataComplete`
   states the measurement it rests on rather than asserting a service-wide rule.
-* The module is `github.com/yacchi/ebml`, and the CLI is `ebml` under
-  `go/cmd/ebml`. The public `go/writer` package replaced the four private
+* The module is `github.com/yacchi/ebml/impl/go`, and the CLI is `ebml` under
+  `impl/go/cmd/ebml`. The public `impl/go/writer` package replaced the four private
   encoders formerly in `internal/kvsgen`, `tree/tree_test.go`,
   `ext/fragment/synthetic_test.go`, and `matroska/unknown_elements_test.go`.
   The fixture corpus is generated through the public writer, and round-trip
@@ -504,7 +523,7 @@ Leaf decoding helpers, `ParseSimpleBlock` and its inverse
 not turn the core into a retained document model. `Append` is not a second EBML
 encoder either: a block's internals are a payload layout inside one binary leaf,
 which is why the pair takes and returns bytes and never an element ID, and the
-element around it is still written by `go/writer`.
+element around it is still written by `impl/go/writer`.
 
 ## Roadmap
 
@@ -513,14 +532,14 @@ control, iterator placement, and Go extensions are documented; remaining work is
 focused on broader reading conformance and Matroska coverage:
 
 1. CRC-32 is DONE on both sides and is not a parser feature: the primitive is
-   `go/crc`, emission is `writer.WithChecksum(crcID)` on a `Buffered` master,
+   `impl/go/crc`, emission is `writer.WithChecksum(crcID)` on a `Buffered` master,
    and verification is `tree.Element.VerifyChecksum` on one element, with
    recursion left to the caller's `Walk`. What remains out of scope is not a
    gap: verification is available exactly where the covered bytes were RETAINED,
    so a consumer that skipped a subtree, or capped payloads with
    `WithMaxPayload`, has nothing to sum and is told so
    (`ChecksumUnavailableError`) rather than passed. Nothing verifies implicitly,
-   and `go/parser` still holds no element knowledge, so a streaming checksum
+   and `impl/go/parser` still holds no element knowledge, so a streaming checksum
    cannot live there. `Void` remains an opaque skippable leaf.
 2. Element coverage is DONE and is now a checked property, not a claim: the
    registry names 270 of the 273 elements the official schemas declare, with
@@ -539,7 +558,7 @@ focused on broader reading conformance and Matroska coverage:
 
 ## Build, fixtures, and documentation
 
-Run commands from `go/`:
+Run commands from `impl/go/`:
 
 ```bash
 go test ./...
@@ -552,11 +571,11 @@ first, which is what the `conformance-check` skill is for. The command it ends
 up running, from the repository root:
 
 ```bash
-go -C go run ./internal/specconform/checkschema \
-  -schema ../.spec-cache/ebml.xml -schema ../.spec-cache/ebml_matroska.xml -missing
+go -C impl/go run ./internal/specconform/checkschema \
+  -schema ../../.spec-cache/ebml.xml -schema ../../.spec-cache/ebml_matroska.xml -missing
 ```
 
-Run the separate KVS module commands from `go/integrations/kvs/`:
+Run the separate KVS module commands from `impl/go/integrations/kvs/`:
 
 ```bash
 go test ./...
@@ -572,7 +591,7 @@ LANGUAGE-NEUTRAL and stays that way: what the library is, the contract, the
 implementation table, and what every implementation shares (the corpus at the
 repository root, which is why it lives there). It shows no code in any one
 language, so a second implementation costs it one table row and nothing else.
-`go/README.md` is the whole of the Go documentation — the package map, the
+`impl/go/README.md` is the whole of the Go documentation — the package map, the
 dependency direction `internal/archtest` enforces, entry-point selection, usage
 core-first then extensions, and the commands. Go usage has exactly ONE home;
 never restate it at the root, and never add a per-language section there.
