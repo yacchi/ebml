@@ -64,6 +64,63 @@ func TestCoreDependencyGraph(t *testing.T) {
 	}
 }
 
+// TestExtPackagesAreLeaves pins the other half of the ext rule. Core must not
+// depend on ext, which TestCoreDependencyGraph already checks; this checks that
+// no ext package depends on ANOTHER ext package either.
+//
+// An ext package is a way of USING the core, and a way of using something is
+// never a prerequisite of another way of using it. The edge this forbids existed
+// twice and each time it was a capability wearing the wrong name: ext/fragment
+// imported ext/tags for Fragment.Tag and Fragment.Tags, which were ext/tags
+// applied to Target{} behind a plainer spelling, and ext/tags imported ext/scope
+// for a Read(*scope.Scope) that named the narrow case with the base name. Both
+// are gone -- a fragment's tags are tags.Read(frag.Segment), and a scope's are
+// tags.ReadFrom(sc) through an interface scope satisfies without knowing it
+// exists -- and neither may come back through a convenience accessor.
+//
+// A TEST may still import a sibling ext package: go list -deps reports the
+// non-test dependencies, which is the shipped graph, and proving that ext/tags
+// reads what ext/fragment retains is exactly what such a test is for.
+func TestExtPackagesAreLeaves(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	moduleRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "../.."))
+
+	// The list is discovered, never written down: a prohibition that skips a
+	// package it has not heard of is not a prohibition.
+	pkgs := listPackages(t, moduleRoot, "./ext/...")
+	if len(pkgs) == 0 {
+		t.Fatal("no ext packages found")
+	}
+	for _, pkg := range pkgs {
+		for _, dep := range packageDependencies(t, moduleRoot, pkg) {
+			if strings.HasPrefix(dep, modulePath+"/ext/") {
+				t.Errorf("ext package %s imports ext package %s; an ext package is a way of using the core, not a prerequisite of another ext package", pkg, dep)
+			}
+		}
+	}
+}
+
+func listPackages(t *testing.T, moduleRoot, pattern string) []string {
+	t.Helper()
+	cmd := exec.Command("go", "list", "-f", "{{.ImportPath}}", pattern)
+	cmd.Dir = moduleRoot
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("go list %s: %v", pattern, err)
+	}
+	var pkgs []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			pkgs = append(pkgs, line)
+		}
+	}
+	sort.Strings(pkgs)
+	return pkgs
+}
+
 func packageDependencies(t *testing.T, moduleRoot, pkg string) []string {
 	t.Helper()
 	cmd := exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}}", pkg)
