@@ -1,6 +1,9 @@
 # CLAUDE.md - ebml
 
-This repository is English-only. It is a streaming, cursor-based EBML/Matroska
+This repository is English-only, COMMIT MESSAGES INCLUDED — the rule covers
+everything written into the repository, not only its files, and it overrides any
+personal or global default that prefers another language. It is a streaming,
+cursor-based EBML/Matroska
 library for Go 1.25, rooted at `impl/go/` and published as
 `github.com/yacchi/ebml/impl/go`. The CLI binary is `ebml` (`impl/go/cmd/ebml`). The
 repository directory is still named `ebml-reader`; that is intentional and
