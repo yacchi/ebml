@@ -3,6 +3,15 @@
 // ext/fragment. It reads bytes a caller already obtained -- there is no
 // GetMedia API wrapper here and no AWS SDK dependency at all.
 //
+// That is a standing rule of the integrations layer this package belongs to and
+// not a state it happens to be in: API calls, paging and reconnection stay with
+// the caller, and a consumer deciding how much of the AWS orchestration to own
+// may rely on this package never taking any of it. The rule, and what it would
+// take to move it, is in go/integrations/doc.go.
+//
+// The bytes may come from a live GetMedia response or from the finite result of
+// GetMediaForFragmentList; see NewReader.
+//
 // This package is not affiliated with, endorsed by, or sponsored by Amazon Web
 // Services; the service name appears here descriptively only.
 package kvs
@@ -35,15 +44,24 @@ const (
 
 // MetadataComplete reports that a pending fragment's Segment-level metadata is
 // settled, for use as ext/fragment.WithMetadataComplete. It is the KVS knowledge
-// that ext/fragment deliberately lacks: GetMedia writes
-// AWS_KINESISVIDEO_CONTINUATION_TOKEN in the LAST Tags element of each chunk it
-// returns, so a fragment carrying that token has all the metadata its document will
-// ever state.
+// that ext/fragment deliberately lacks: a fragment carrying
+// AWS_KINESISVIDEO_CONTINUATION_TOKEN is taken to have all the metadata its
+// document will ever state.
 //
 // Without it, ext/fragment must wait for the next Cluster to know that no further
 // Tags follow, and a stream with one Cluster per document -- which is what GetMedia
 // sends -- makes that a wait of one whole fragment. With it there is no wait: the
 // token arrives a few hundred bytes after the Cluster it belongs to.
+//
+// WHAT THIS RESTS ON. The continuation token is written by the SERVICE rather
+// than by a producer, and in every stream measured -- Amazon Connect as producer,
+// 112 fragments across several captures, no exceptions -- it was the last tag of
+// its document. That the same holds for every producer is an inference from where
+// the tag comes from, not something this library has observed. The predicate is
+// safe under that uncertainty because it is one-directional: an input whose token
+// arrives before some other Tags element simply does not release early, and falls
+// back to ext/fragment's element-agnostic default. The failure mode is a slower
+// release, never a fragment missing metadata.
 //
 // It is passed by NewReader already; a caller assembling fragments itself passes it
 // to ext/fragment.New, exactly as it would pass matroska.StreamBoundary to
@@ -104,6 +122,10 @@ func DescribeErrorID(id int) string {
 // Err reports the in-band GetMedia error this fragment carries, or nil.
 // It returns non-nil whenever AWS_KINESISVIDEO_ERROR_CODE is present, even
 // if AWS_KINESISVIDEO_ERROR_ID is missing.
+//
+// A Reader caller need not call it to be told: Reader.Next reports the same
+// failure itself, right after the fragment that carried it. This is for reading
+// the failure off one fragment, not for discovering it.
 func (m Metadata) Err() error {
 	code, ok := m.Tags[TagErrorCode]
 	if !ok {

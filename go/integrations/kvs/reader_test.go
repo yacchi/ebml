@@ -311,3 +311,87 @@ func TestReaderDeliversSalvagedTailBeforeError(t *testing.T) {
 		t.Fatalf("Next after the truncation = %v, want the sticky %v", e, err)
 	}
 }
+
+// errorTagStream is a healthy document followed by one carrying the in-band
+// failure GetMedia reports through AWS_KINESISVIDEO_ERROR_CODE / _ERROR_ID.
+func errorTagStream() []byte {
+	simpleTag := func(name, value string) ebmltest.Node {
+		return ebmltest.Master(matroska.IDSimpleTag,
+			ebmltest.UTF8(matroska.IDTagName, name),
+			ebmltest.UTF8(matroska.IDTagString, value))
+	}
+	doc := func(seed byte, tags ...ebmltest.Node) []byte {
+		return ebmltest.Encode(
+			ebmltest.Master(matroska.IDEBML, ebmltest.Uint(matroska.IDEBMLVersion, 1)),
+			ebmltest.UnknownMaster(matroska.IDSegment,
+				ebmltest.Master(matroska.IDInfo,
+					ebmltest.Leaf(matroska.IDSegmentUUID, bytes.Repeat([]byte{seed}, 16))),
+				ebmltest.Master(matroska.IDTags, ebmltest.Master(matroska.IDTag, tags...)),
+				ebmltest.UnknownMaster(matroska.IDCluster,
+					ebmltest.Uint(matroska.IDTimestamp, 0),
+					ebmltest.Leaf(matroska.IDSimpleBlock, []byte{0x81, 0, 0, 0, 0x11})),
+			),
+		)
+	}
+	return ebmltest.Concat(
+		doc(1, simpleTag(TagFragmentNumber, "100")),
+		doc(2, simpleTag(TagFragmentNumber, "101"),
+			simpleTag(TagErrorCode, "ARCHIVAL_ERROR"),
+			simpleTag(TagErrorID, "3002")),
+	)
+}
+
+// TestReaderReportsInBandStreamError pins the half of the contract a consumer
+// cannot forget: the in-band error is REPORTED by Next, so a stream KVS stopped
+// on an error can never read as a short clean end. It follows the fragment that
+// carried it -- the same "the error comes after what completed" ordering the
+// truncated tail uses -- so a caller that breaks on the error still received
+// every fragment, and it is sticky afterwards.
+func TestReaderReportsInBandStreamError(t *testing.T) {
+	r := NewReader(bytes.NewReader(errorTagStream()))
+
+	var numbers []string
+	var err error
+	for {
+		_, m, e := r.Next()
+		if e != nil {
+			err = e
+			break
+		}
+		numbers = append(numbers, m.FragmentNumber)
+	}
+
+	if want := []string{"100", "101"}; !slices.Equal(numbers, want) {
+		t.Fatalf("delivered fragments %v, want %v -- the error must not swallow the one carrying it", numbers, want)
+	}
+	var streamErr *StreamError
+	if !errors.As(err, &streamErr) {
+		t.Fatalf("Next ended with %v, want a *StreamError", err)
+	}
+	if streamErr.Code != "ARCHIVAL_ERROR" || streamErr.ID != 3002 {
+		t.Fatalf("StreamError = %+v, want code ARCHIVAL_ERROR id 3002", streamErr)
+	}
+	if _, _, e := r.Next(); e != err {
+		t.Fatalf("Next after the stream error = %v, want the sticky %v", e, err)
+	}
+}
+
+// TestReaderStreamErrorFragmentStillCarriesMetadata keeps Metadata.Err working
+// for a caller that inspects the fragment itself: reporting through Next is an
+// addition, not a replacement.
+func TestReaderStreamErrorFragmentStillCarriesMetadata(t *testing.T) {
+	r := NewReader(bytes.NewReader(errorTagStream()))
+	if _, _, err := r.Next(); err != nil {
+		t.Fatal(err)
+	}
+	f, m, err := r.Next()
+	if err != nil {
+		t.Fatalf("the fragment carrying the error tags must arrive without an error of its own, got %v", err)
+	}
+	if f == nil {
+		t.Fatal("no fragment delivered for the erroring document")
+	}
+	if m.Err() == nil {
+		t.Fatal("Metadata.Err() = nil on the fragment carrying the error tags")
+	}
+}

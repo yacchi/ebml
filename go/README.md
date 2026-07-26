@@ -735,6 +735,32 @@ func main() {
 }
 ```
 
+### In-band stream errors
+
+GetMedia reports a failure inside the stream, as
+`AWS_KINESISVIDEO_ERROR_CODE`/`_ERROR_ID` tags on a fragment, rather than by
+cutting the connection. `Next` **reports** it: the fragment carrying the tags is
+handed over first, then the next call returns a `*kvs.StreamError`, which is
+sticky. There is no option either way.
+
+The alternative — leaving it to the caller to ask `Metadata.Err()` — was
+rejected because forgetting to ask makes a stream that KVS stopped on an error
+look like a short clean end, and a consumer reported losing time to exactly that
+class of silent failure. `Metadata.Err()` remains for reading the failure off one
+fragment. The error follows its fragment rather than accompanying it so that
+`if err != nil { break }` cannot drop data, which is the ordering the truncated
+tail already uses.
+
+One shape stays outside this: error tags in a document that assembles no
+`Cluster` produce no fragment, so `Next` never sees them.
+
+### Finite input
+
+`GetMediaForFragmentList` returns the same document shape as GetMedia, only
+finite. The same `kvs.NewReader` reads it — nothing assumes the input continues,
+and the end of the input closes the open document exactly as the end of a live
+capture does.
+
 ### Tag inheritance
 
 Tag inheritance is not something `ext/fragment` decides: `tags.Read` over a

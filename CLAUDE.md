@@ -324,6 +324,22 @@ carries no meaning.
   fixture corpus and must not be added to it — every fixture must parse cleanly
   and round-trip byte-identically, which a truncated one cannot; it is covered by
   package-level synthetic tests in both modules instead.
+* AN IN-BAND FAILURE IS REPORTED, NEVER MERELY AVAILABLE. GetMedia states a
+  failure as `AWS_KINESISVIDEO_ERROR_CODE` tags on a fragment instead of cutting
+  the connection, and `kvs.Reader.Next` returns it as a `*StreamError` — sticky,
+  with no option to enable or disable it. Leaving it to `Metadata.Err()` made a
+  stream KVS STOPPED ON AN ERROR read as a short clean end to any consumer that
+  forgot the call, and a consumer reported losing time to exactly that silent
+  class (`plans/KVS-FULL-MIGRATION-REQUIREMENTS.md`, requirement 2); a default
+  that goes quiet is the one shape that was not acceptable, so there is no
+  `WithStreamErrors()` opt-in either. The error FOLLOWS the fragment that carried
+  it rather than accompanying it — the requirement asked for them together, and
+  the ordering was chosen against that request on the request's own ground:
+  `if err != nil { break }` must never drop a fragment, which is the rule the
+  truncated tail already follows. `Metadata.Err()` stays, for reading the failure
+  off one fragment; it is no longer how one DISCOVERS it. What this cannot report
+  is stated where it is offered: error tags in a document that assembles no
+  `Cluster` yield no fragment, so `Next` never sees them.
 * A Fragment is ASSEMBLED at its `Cluster`'s end and DELIVERED once its
   Segment-level metadata has settled, and the wait is DEFAULT behavior with no
   option to disable it — the same reasoning that makes truncated-tail salvage
@@ -456,7 +472,10 @@ The core is working and tested:
   the only place tag accessors live: `ext/fragment` has none of its own.
 * `go/integrations/kvs` is a separate module holding all KVS-specific tag and
   metadata knowledge; the core module has no KVS element or tag knowledge left.
-  The runnable example is `go/integrations/kvs/examples/getmedia`.
+  The runnable example is `go/integrations/kvs/examples/getmedia`. `Reader.Next`
+  reports in-band `*StreamError`s itself, the same Reader reads the finite
+  `GetMediaForFragmentList` payload as it reads a live one, and `MetadataComplete`
+  states the measurement it rests on rather than asserting a service-wide rule.
 * The module is `github.com/yacchi/ebml`, and the CLI is `ebml` under
   `go/cmd/ebml`. The public `go/writer` package replaced the four private
   encoders formerly in `internal/kvsgen`, `tree/tree_test.go`,

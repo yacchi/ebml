@@ -55,6 +55,11 @@ type Reader struct {
 
 // NewReader reads a raw KVS GetMedia stream — concatenated unknown-size
 // Matroska Segments — from r.
+//
+// The same Reader reads a FINITE stream of the same shape, which is what
+// GetMediaForFragmentList returns for a fragment list: nothing here assumes the
+// input continues, and the end of the input closes the document that was open,
+// exactly as the end of a live capture does. Only the source differs.
 func NewReader(r io.Reader, opts ...Option) *Reader {
 	// A zero bufferSize means "unset": NewReaderSize supplies the default, so the
 	// number lives in exactly one place.
@@ -87,6 +92,19 @@ func NewReader(r io.Reader, opts ...Option) *Reader {
 // Next returns the next completed fragment and its metadata. It returns io.EOF,
 // and only io.EOF, when the stream ended cleanly.
 //
+// AN IN-BAND FAILURE IS REPORTED, NEVER MERELY AVAILABLE. When a fragment carries
+// AWS_KINESISVIDEO_ERROR_CODE, Next hands that fragment over first and then
+// returns the *StreamError, which is sticky; the stream is not read further,
+// because GetMedia sends nothing after the error it reports. There is no option
+// to disable this and none to enable it: a stream KVS stopped on an error must
+// never be able to read as a short clean end, which is what "the caller may call
+// Metadata.Err" amounted to. Metadata.Err still answers for the fragment itself,
+// for a caller that wants the failure alongside the document that carried it.
+//
+// The one shape this cannot report is an error KVS sends with no Cluster of its
+// own: fragments are what this Reader delivers, so error tags arriving in a
+// document that assembles no fragment are not seen here.
+//
 // A FAILURE NEVER DISCARDS THE FRAGMENTS THAT PRECEDED IT -- including, at EOF,
 // the Cluster that a stream cut mid-element left open, which arrives marked
 // fragment.Fragment.Truncated. That ordering is ext/fragment.Reader's, not
@@ -114,7 +132,17 @@ func (r *Reader) Next() (*fragment.Fragment, Metadata, error) {
 		r.stop()
 		return nil, zero, err
 	}
-	return f, r.metadata(f), nil
+	m := r.metadata(f)
+	if streamErr := m.Err(); streamErr != nil {
+		// GetMedia has reported a failure in-band and this document is the last one
+		// it will send, so the pull is stopped here. The error is LATCHED rather than
+		// returned with the fragment: a caller that leaves the loop on a non-nil
+		// error has then already received every fragment, including this one, which
+		// is the ordering the truncated tail uses for the same reason.
+		r.sticky = streamErr
+		r.stop()
+	}
+	return f, m, nil
 }
 
 func (r *Reader) metadata(f *fragment.Fragment) Metadata {
