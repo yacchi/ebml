@@ -22,6 +22,15 @@ func simpleTag(name, value string, nested ...ebmltest.Node) ebmltest.Node {
 	return ebmltest.Master(matroska.IDSimpleTag, children...)
 }
 
+// valuelessTag is a SimpleTag that declares a TagName and no TagString at all,
+// which is what a tag carrying a TagBinary value, or an incomplete one, looks
+// like. It is not the same shape as simpleTag(name, "").
+func valuelessTag(name string, nested ...ebmltest.Node) ebmltest.Node {
+	children := []ebmltest.Node{ebmltest.UTF8(matroska.IDTagName, name)}
+	children = append(children, nested...)
+	return ebmltest.Master(matroska.IDSimpleTag, children...)
+}
+
 func tag(target *tags.Target, entries ...ebmltest.Node) ebmltest.Node {
 	children := make([]ebmltest.Node, 0, len(entries)+1)
 	if target != nil {
@@ -164,6 +173,47 @@ func TestEmptyTagNameIsSkipped(t *testing.T) {
 	set := tags.Read(readScope(t, segment(tagsElement(tag(nil, simpleTag("", "ignored"))))))
 	if _, ok := set.Get(tags.Target{}, ""); ok {
 		t.Fatal("empty TagName was not skipped")
+	}
+}
+
+func TestAbsentTagStringIsNotAValue(t *testing.T) {
+	set := tags.Read(readScope(t, segment(tagsElement(tag(nil, valuelessTag("state"))))))
+	if got, ok := set.Get(tags.Target{}, "state"); ok {
+		t.Fatalf("Get(state) = %q, %v; want no value: an absent TagString is not an empty one", got, ok)
+	}
+	if got := set.Values(tags.Target{}, "state"); got != nil {
+		t.Fatalf("Values(state) = %v, want nil", got)
+	}
+	if _, present := set.All(tags.Target{})["state"]; present {
+		t.Fatal("All included a name whose SimpleTag declared no TagString")
+	}
+}
+
+func TestEmptyTagStringIsAValue(t *testing.T) {
+	set := tags.Read(readScope(t, segment(tagsElement(tag(nil, simpleTag("state", ""))))))
+	if got, ok := set.Get(tags.Target{}, "state"); !ok || got != "" {
+		t.Fatalf("Get(state) = %q, %v; want the declared empty value", got, ok)
+	}
+}
+
+func TestAbsentTagStringDoesNotOverwriteAValue(t *testing.T) {
+	raw := segment(tagsElement(
+		tag(nil, simpleTag("state", "real")),
+		tag(nil, valuelessTag("state")),
+	))
+	set := tags.Read(readScope(t, raw))
+	if got, ok := set.Get(tags.Target{}, "state"); !ok || got != "real" {
+		t.Fatalf("Get(state) = %q, %v; want real: a valueless SimpleTag must not erase a value under last-wins", got, ok)
+	}
+}
+
+func TestValuelessSimpleTagStillCarriesItsChildren(t *testing.T) {
+	raw := segment(tagsElement(tag(nil,
+		valuelessTag("outer", simpleTag("inner", "two")),
+	)))
+	set := tags.Read(readScope(t, raw))
+	if got, ok := set.Get(tags.Target{}, "inner"); !ok || got != "two" {
+		t.Fatalf("nested tag = %q, %v; want two: skipping a value must not skip the subtree", got, ok)
 	}
 }
 

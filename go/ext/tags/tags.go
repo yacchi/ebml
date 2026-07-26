@@ -15,6 +15,15 @@ type Target struct {
 }
 
 // Set is a computed view of tags, grouped by their decoded target.
+//
+// A SimpleTag contributes a value only when it declares a TagString element: an
+// ABSENT TagString is not an empty one, so a SimpleTag carrying its value in a
+// TagBinary, or one that names a tag without stating it, is not reported as the
+// empty string. It would otherwise be indistinguishable from a declared empty
+// value, and under the last-wins precedence Get documents it would ERASE a value
+// stated earlier in the stream. A TagString that is present and empty is a value
+// and is reported as one. Skipping the value never skips the subtree: a nested
+// SimpleTag inside a valueless one still counts.
 type Set struct {
 	values  map[Target]map[string][]string
 	targets []Target
@@ -52,13 +61,17 @@ func read(roots []*tree.Element) *Set {
 				if name == "" {
 					continue
 				}
+				value := simple.Find(matroska.IDTagString)
+				if !value.Exists() {
+					continue
+				}
 				if _, ok := out.values[target]; !ok {
 					out.values[target] = make(map[string][]string)
 					out.targets = append(out.targets, target)
 				}
 				out.values[target][name] = append(
 					out.values[target][name],
-					simple.Find(matroska.IDTagString).AsString(),
+					value.AsString(),
 				)
 			}
 		}
