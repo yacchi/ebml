@@ -12,6 +12,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yacchi/ebml/ext/fragment"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
 )
 
 // The SimpleTag names GetMedia adds to every chunk it returns, and the two it
@@ -27,6 +31,29 @@ const (
 	TagErrorCode         = "AWS_KINESISVIDEO_ERROR_CODE"
 	TagErrorID           = "AWS_KINESISVIDEO_ERROR_ID"
 )
+
+// MetadataComplete reports that a pending fragment's Segment-level metadata is
+// settled, for use as ext/fragment.WithMetadataComplete. It is the KVS knowledge
+// that ext/fragment deliberately lacks: GetMedia writes
+// AWS_KINESISVIDEO_CONTINUATION_TOKEN in the LAST Tags element of each chunk it
+// returns, so a fragment carrying that token has all the metadata its document will
+// ever state.
+//
+// Without it, ext/fragment must wait for the next Cluster to know that no further
+// Tags follow, and a stream with one Cluster per document -- which is what GetMedia
+// sends -- makes that a wait of one whole fragment. With it there is no wait: the
+// token arrives a few hundred bytes after the Cluster it belongs to.
+//
+// It is passed by NewReader already; a caller assembling fragments itself passes it
+// to ext/fragment.New, exactly as it would pass matroska.StreamBoundary to
+// parser.WithBoundary.
+func MetadataComplete(pending *fragment.Fragment, completed parser.ElementID) bool {
+	if completed != matroska.IDTags {
+		return false
+	}
+	_, ok := pending.Tag(TagContinuationToken)
+	return ok
+}
 
 // Metadata is the typed view of one fragment's AWS tags. Every field is the
 // zero value when its tag is absent; a fragment carrying no Tags element at all

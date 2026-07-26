@@ -7,14 +7,22 @@
 // is deliberately outside the cross-language contract that spec/SPEC.md defines,
 // and other-language ports are not expected to provide an equivalent.
 //
-// # Early emission
+// # When a Fragment is assembled, and when it is delivered
 //
-// The defining property, inherited from the cursor, is early emission: a Fragment
-// is produced when its Cluster closes, including an unknown-size Cluster when the
+// The defining property, inherited from the cursor, is early ASSEMBLY: a Fragment
+// is complete when its Cluster closes, including an unknown-size Cluster when the
 // first registered non-child element appears, without waiting for the enclosing
 // unknown-size Segment to close, for the next Segment's header to arrive, or for
 // connection EOF. Segment and Cluster boundaries are found structurally, never by
 // scanning the bytes for the EBML magic, which can occur inside PCM.
+//
+// DELIVERY waits a little longer, and by default until the Segment-level metadata
+// can no longer grow ahead of the next Cluster -- because a live stream writes some
+// of that metadata AFTER the Cluster it describes, and a fragment handed over at the
+// Cluster's end therefore carries a partial view with nothing in it to say so. See
+// WithMetadataComplete for what the wait costs, how a consumer that knows its
+// stream's layout shortens it to nothing, and how one that wants the Cluster's-end
+// snapshot asks for it.
 //
 // # What a Fragment retains
 //
@@ -36,7 +44,7 @@
 // On top of both sit the accessors that add something the trees cannot state on
 // their own -- a spec default, a unit conversion or a derivation: Tag, Tags,
 // Tracks, Track, TrackByName, TimestampScale, ClusterTimestamp, BlockTime,
-// StartTime, EndTime and TrackPCM.
+// StartTime, EndTime, TrackPCM and TrackPCMByName.
 //
 // For an Amazon KVS GetMedia consumer, see go/kvs/examples/getmedia.
 package fragment
@@ -67,15 +75,20 @@ type Fragment struct {
 	// Every child is a finished subtree: an element still being read when this
 	// Cluster completed cannot be one of them.
 	//
-	// It is a view of a streaming Segment, not a document. Metadata is never
-	// re-attributed: nothing is added to this Fragment on account of a later
-	// Cluster, and the Fragment is never re-emitted. The node itself, though, is
-	// the one every Fragment of this Segment shares, so a stream that places
-	// further Segment-level metadata AFTER this Cluster extends it as it
-	// continues. Matroska and KVS put the metadata describing a Cluster before it,
-	// so a Fragment consumed as it arrives -- which is what this package is for --
-	// sees a stable view; a consumer that hoards Fragments and inspects them much
-	// later should copy what it needs when it receives them.
+	// It is a view of a streaming Segment, not a document, and it is the node every
+	// Fragment of this Segment SHARES: a stream that places further Segment-level
+	// metadata after this Cluster extends it as it continues. RFC 9559 makes Segment
+	// tags cumulative and positionless, so that is not late attribution but the same
+	// metadata becoming visible to every Fragment of the Segment.
+	//
+	// What the delivery rule guarantees is that at the moment this Fragment is handed
+	// over, every Segment-level element preceding the NEXT Cluster has been retained
+	// -- so reading metadata on receipt is enough, which is what a consumer wants and
+	// what a live Amazon Connect stream, writing tags both before and after its
+	// Cluster, would otherwise deny. A consumer that asked for eager emission with
+	// WithMetadataComplete gets no such guarantee, by its own choice. A consumer that
+	// hoards Fragments and inspects them much later should copy what it needs on
+	// receipt either way, since this tree keeps growing until its Segment ends.
 	Segment *tree.Element
 
 	// Cluster is the completed Cluster element with its children retained, except

@@ -68,7 +68,12 @@ func NewReader(r io.Reader, opts ...Option) *Reader {
 	// reading of the tags and nothing else. iter.Pull2 is what turns that layer's
 	// iterator back into the Next this package's API is spelled with -- kvs.Next
 	// carries metadata alongside the fragment, which a range loop cannot.
-	src := fragment.NewReaderSize(r, o.bufferSize, o.assemblerOptions...)
+	// MetadataComplete comes FIRST so a caller's own WithMetadataComplete overrides
+	// it: this package knows the KVS layout, and passing that knowledge on is what it
+	// is for, but it is not a decision the caller may not revisit.
+	asmOpts := append([]fragment.Option{fragment.WithMetadataComplete(MetadataComplete)},
+		o.assemblerOptions...)
+	src := fragment.NewReaderSize(r, o.bufferSize, asmOpts...)
 	next, stop := iter.Pull2(src.Fragments())
 	return &Reader{
 		next:        next,

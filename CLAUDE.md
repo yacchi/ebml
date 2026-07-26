@@ -249,6 +249,31 @@ carries no meaning.
   fixture corpus and must not be added to it — every fixture must parse cleanly
   and round-trip byte-identically, which a truncated one cannot; it is covered by
   package-level synthetic tests in both modules instead.
+* A Fragment is ASSEMBLED at its `Cluster`'s end and DELIVERED once its
+  Segment-level metadata has settled, and the wait is DEFAULT behavior with no
+  option to disable it — the same reasoning that makes truncated-tail salvage
+  default: it changes no error's terminality, only when an already-assembled
+  fragment becomes reachable, and the opt-in options exist precisely for the
+  changes that DO alter terminality. The default release points are the next
+  `Cluster`'s header, the `Segment`'s end, and the end of input, all of them
+  structural, so split-invariance holds. This OVERTURNS the earlier answer to Q3
+  in `KVS-CONSUMER-FEEDBACK.md` — that a Fragment is a snapshot taken at Cluster
+  close, with post-Cluster metadata reachable only through `ext/scope` — because
+  field measurement retired it: a consumer reading tags on receipt lost identity
+  keys silently (112 fragments became 27, 76% of the audio), the loss was
+  READ-SIZE DEPENDENT so it never reproduced in tests that fed a whole capture at
+  once, and `connect_real_shape` shows why — Amazon Connect writes two `Tags`
+  before its `Cluster` and two after. A layout every consumer must compensate for
+  belongs in the library. Waiting for the next `Cluster` is the only
+  ELEMENT-AGNOSTIC proof that no further `Tags` follow, so in the KVS
+  one-Cluster-per-document shape the default wait lasts a fragment;
+  `WithMetadataComplete` is the one escape and takes a CALLER-SUPPLIED predicate,
+  exactly as `parser.WithBoundary` takes `matroska.StreamBoundary` — which is why
+  `kvs.MetadataComplete` (release on the continuation token GetMedia writes last)
+  lives in `go/kvs` and `ext/fragment` still knows no tag name. A predicate that
+  always returns true IS the old eager emission, which is why there is no second
+  option for it; its view is read-size dependent by nature and that is documented
+  where it is offered, never hidden.
 * There is no query DSL or second index type.
 * A documented guarantee is never weakened to match an implementation gap.
   When the KVS consumer review (`KVS-CONSUMER-FEEDBACK.md`, F1) reported the
@@ -332,7 +357,10 @@ The core is working and tested:
   gives each header's original size-VINT width. `go/ext/fragment` assembles one
   `Fragment` per completed `Cluster` by pulling `Cursor.Next` in its own loop,
   using only exported core APIs, with `WithResync` and `WithSkipContentErrors`
-  as its two opt-in, per-error-class recovery options.
+  as its two opt-in, per-error-class recovery options. It has two entry points
+  differing only in who supplies the bytes — `New`/`Feed` for a caller that
+  pushes, and `NewReader`/`Fragments() iter.Seq2[*Fragment, error]` for one that
+  hands over an `io.Reader` — and the same options mean the same thing in both.
 * `go/stream` owns an `io.Reader` and answers `NeedMoreData` while driving a
   cursor. Its whole reading surface is `Nodes() iter.Seq2[parser.Node, error]`;
   there is no exported `Next`, and `stream` is the working proof of the arity rule

@@ -271,7 +271,17 @@ func TestBinaryPayloadIsNotStringMangled(t *testing.T) {
 // It also pins the documented consequence of the two Fragments SHARING one
 // Segment node, which is why this test inspects the first Fragment at the moment
 // it is delivered.
-func TestLateMetadataIsNotAttributedToAnEarlierFragment(t *testing.T) {
+// TestSegmentMetadataHasSettledOnDelivery is the emission rule: a fragment is
+// assembled at its Cluster's end and HELD until its Segment-level metadata can no
+// longer grow before the next Cluster, so metadata written after the Cluster is in
+// the view the caller is handed.
+//
+// This is deliberately the opposite of attributing tags by position. RFC 9559 makes
+// Segment tags cumulative and POSITIONLESS, and every fragment of a Segment shares
+// its tree, so a tag that differs between two fragments of one Segment was only ever
+// an artifact of WHEN the consumer looked. Emitting at the Cluster's end made that
+// artifact the default and cost a consumer the tags its stream had already stated.
+func TestSegmentMetadataHasSettledOnDelivery(t *testing.T) {
 	tracks := synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER"))
 	cluster1 := synCluster(0, synSimpleBlock(1, 0, []byte{0x01}))
 	lateTags := synTags("ContactId", "late")
@@ -288,32 +298,126 @@ func TestLateMetadataIsNotAttributedToAnEarlierFragment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Feed: %v", err)
 	}
-	if len(first) != 1 {
-		t.Fatalf("got %d fragments from the first Feed, want 1", len(first))
-	}
-	if got, ok := first[0].Tag("ContactId"); ok {
-		t.Fatalf("fragment 1 carries a tag that had not arrived yet: %q", got)
-	}
-	if got := len(first[0].Values(matroska.IDSimpleTag)); got != 0 {
-		t.Fatalf("fragment 1 sees %d SimpleTags, want 0 at the moment it is delivered", got)
+	if len(first) != 0 {
+		t.Fatalf("got %d fragments from the first Feed; the Cluster ended but its metadata had not settled", len(first))
 	}
 
 	second, err := a.Feed(raw[cut:])
 	if err != nil {
 		t.Fatalf("Feed: %v", err)
 	}
+	// Fragment 1 is released by fragment 2's Cluster header, which is the proof that
+	// no further Segment-level metadata belongs before it.
 	if len(second) != 1 {
-		t.Fatalf("got %d fragments from the second Feed, want 1", len(second))
+		t.Fatalf("got %d fragments from the second Feed, want the 1 released by the next Cluster", len(second))
 	}
 	if got, ok := second[0].Tag("ContactId"); !ok || got != "late" {
-		t.Fatalf("fragment 2 ContactId = %q, %v; want the metadata that arrived before its Cluster", got, ok)
+		t.Fatalf("fragment 1 ContactId = %q, %v; want the tag that had settled by delivery", got, ok)
+	}
+	if got := len(second[0].Blocks); got != 1 || second[0].Blocks[0].Frames[0][0] != 0x01 {
+		t.Fatalf("released fragment carries %d blocks; want fragment 1's own block", got)
+	}
+
+	tail, err := a.Finalize()
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if len(tail) != 1 {
+		t.Fatalf("Finalize released %d fragments, want fragment 2", len(tail))
+	}
+	if got, ok := tail[0].Tag("ContactId"); !ok || got != "late" {
+		t.Fatalf("fragment 2 ContactId = %q, %v; the tag is the Segment's, not one fragment's", got, ok)
+	}
+	// Both Fragments share the one Segment node, as documented -- which is why the
+	// tag is the same for both.
+	if second[0].Segment != tail[0].Segment {
+		t.Fatal("Fragments of one Segment must share its tree")
+	}
+}
+
+// TestMetadataCompleteReleasesEarly is the escape hatch: a consumer that knows its
+// stream's layout releases on the element its producer writes last, and pays no
+// wait at all. The knowledge stays in the predicate -- this package never learns a
+// tag name.
+func TestMetadataCompleteReleasesEarly(t *testing.T) {
+	tracks := synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER"))
+	cluster := synCluster(0, synSimpleBlock(1, 0, []byte{0x01}))
+	trailing := synTags("LAST", "yes")
+	raw := synFragment(tracks, cluster, trailing)
+
+	var asked []parser.ElementID
+	frags := runWhole(t, raw, fragment.WithMetadataComplete(
+		func(pending *fragment.Fragment, completed parser.ElementID) bool {
+			asked = append(asked, completed)
+			_, done := pending.Tag("LAST")
+			return done
+		},
+	))
+	if len(frags) != 1 {
+		t.Fatalf("got %d fragments, want 1", len(frags))
+	}
+	if got, ok := frags[0].Tag("LAST"); !ok || got != "yes" {
+		t.Fatalf("released fragment LAST = %q, %v; want the tag it waited for", got, ok)
+	}
+	// The predicate is consulted for the Cluster itself first, then for each direct
+	// child of the Segment that completes while the fragment is held.
+	if len(asked) < 2 || asked[0] != matroska.IDCluster {
+		t.Fatalf("predicate saw %v; want the Cluster first, then the trailing metadata", asked)
+	}
+	if asked[len(asked)-1] != matroska.IDTags {
+		t.Fatalf("predicate's last consult was %s, want Tags", asked[len(asked)-1])
+	}
+}
+
+// TestMetadataCompleteAlwaysTrueIsEagerEmission pins the documented idiom: a
+// predicate that always says yes emits at the Cluster's end, which is what a
+// real-time analysis consumer wants -- knowingly taking the partial view.
+func TestMetadataCompleteAlwaysTrueIsEagerEmission(t *testing.T) {
+	tracks := synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER"))
+	cluster1 := synCluster(0, synSimpleBlock(1, 0, []byte{0x01}))
+	lateTags := synTags("ContactId", "late")
+	cluster2 := synCluster(1024, synSimpleBlock(1, 0, []byte{0x02}))
+	raw := synFragment(tracks, cluster1, lateTags, cluster2)
+
+	const segmentHeaderLen = 4 + 8
+	cut := len(ebmltest.Encode(synEBMLHeader())) + segmentHeaderLen +
+		len(ebmltest.Encode(tracks)) + len(ebmltest.Encode(cluster1))
+
+	a := fragment.New(fragment.WithMetadataComplete(
+		func(*fragment.Fragment, parser.ElementID) bool { return true },
+	))
+	first, err := a.Feed(raw[:cut])
+	if err != nil {
+		t.Fatalf("Feed: %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("got %d fragments from the first Feed, want 1 at the Cluster's end", len(first))
+	}
+	if got, ok := first[0].Tag("ContactId"); ok {
+		t.Fatalf("eager fragment carries a tag that had not arrived yet: %q", got)
+	}
+	if _, err := a.Feed(raw[cut:]); err != nil {
+		t.Fatalf("Feed: %v", err)
 	}
 	if _, err := a.Finalize(); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	// Both Fragments share the one Segment node, as documented.
-	if first[0].Segment != second[0].Segment {
-		t.Fatal("Fragments of one Segment must share its tree")
+}
+
+// TestMetadataCompleteNilIsTheDefault keeps the option from being able to make a
+// fragment vanish: a nil predicate is the default rule, not "never release".
+func TestMetadataCompleteNilIsTheDefault(t *testing.T) {
+	raw := synFragment(
+		synTracks(synTrackEntry(1, "AUDIO_FROM_CUSTOMER")),
+		synCluster(0, synSimpleBlock(1, 0, []byte{0x01})),
+		synTags("trailing", "yes"),
+	)
+	frags := runWhole(t, raw, fragment.WithMetadataComplete(nil))
+	if len(frags) != 1 {
+		t.Fatalf("got %d fragments, want 1", len(frags))
+	}
+	if got, ok := frags[0].Tag("trailing"); !ok || got != "yes" {
+		t.Fatalf("trailing tag = %q, %v; want the default wait to have settled it", got, ok)
 	}
 }
 

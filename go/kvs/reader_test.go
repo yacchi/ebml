@@ -7,9 +7,11 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/yacchi/ebml/ext/fragment"
 	"github.com/yacchi/ebml/internal/ebmltest"
 	"github.com/yacchi/ebml/internal/kvsgen"
 	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
 )
 
 func fixture(t *testing.T, name string) []byte {
@@ -58,11 +60,21 @@ func TestReaderSplitInvariant(t *testing.T) {
 	}
 }
 
-// Q3 in KVS-CONSUMER-FEEDBACK.md is settled: Metadata describes the fragment as
-// it stood when its Cluster closed, so it carries the tags written before the
-// Cluster and not those written after. No notification of later metadata is
-// provided; a consumer that needs the continuation token reads it from
-// ext/scope, whose finished scope arrives before the next fragment's payload.
+// Q3 in KVS-CONSUMER-FEEDBACK.md asked how the metadata GetMedia writes AFTER a
+// Cluster reaches a consumer, and the answer has CHANGED: Metadata carries it. A
+// fragment is delivered once its Segment-level metadata has settled, and this
+// package tells ext/fragment when that is -- MetadataComplete releases on the
+// continuation token, which GetMedia writes last -- so the whole of a chunk's
+// metadata is in one Metadata and no consumer has to hold fragments to assemble it.
+//
+// The earlier answer -- that Metadata is a snapshot at Cluster close, with later
+// tags reachable only through ext/scope -- was retired by field measurement: a
+// consumer reading tags at delivery lost identity keys silently, and the loss was
+// read-size dependent, so it appeared only in production.
+//
+// The read size is deliberately the one that cuts just past the pre-Cluster Tags,
+// which is what used to make this observable: the delivery point no longer depends
+// on it.
 func TestReaderConnectRealShapeMetadataScope(t *testing.T) {
 	raw := fixture(t, "connect_real_shape")
 	tagsID := []byte{0x12, 0x54, 0xc3, 0x67}
@@ -85,11 +97,50 @@ func TestReaderConnectRealShapeMetadataScope(t *testing.T) {
 	if m.ProducerTimestamp.IsZero() || m.ServerTimestamp.IsZero() {
 		t.Fatalf("timestamps = producer %v, server %v; want both populated", m.ProducerTimestamp, m.ServerTimestamp)
 	}
-	if m.ContinuationToken != "" {
-		t.Fatalf("ContinuationToken = %q, want empty", m.ContinuationToken)
+	// Written after the Cluster, and present because delivery waited for it.
+	if m.ContinuationToken == "" {
+		t.Fatal("ContinuationToken is empty; the post-Cluster metadata was not settled before delivery")
 	}
-	if m.MillisBehindNow != 0 {
-		t.Fatalf("MillisBehindNow = %v, want zero", m.MillisBehindNow)
+	if _, ok := m.Tags[TagMillisBehindNow]; !ok {
+		t.Fatalf("Tags is missing %s, also written after the Cluster", TagMillisBehindNow)
+	}
+}
+
+// TestReaderCallerOverridesMetadataCompletion keeps NewReader's KVS default from
+// being a decision the caller cannot revisit: an explicit predicate wins, including
+// the always-true one that restores emission at the Cluster's end.
+//
+// The read size is what makes the override OBSERVABLE, and that is the point rather
+// than an artifact: Fragment.Tags is a live view of a Segment tree that keeps
+// growing, so an eagerly emitted fragment shows whatever had been parsed by the time
+// the caller looked -- with one large read even the post-Cluster tags are already
+// in. That read-size dependence is exactly why waiting is the default; a consumer
+// asking for eager emission is asking for the snapshot and its caveats.
+func TestReaderCallerOverridesMetadataCompletion(t *testing.T) {
+	raw := fixture(t, "connect_real_shape")
+	tagsID := []byte{0x12, 0x54, 0xc3, 0x67}
+	offset := 0
+	for i := 0; i < 4; i++ {
+		next := bytes.Index(raw[offset:], tagsID)
+		if next < 0 {
+			t.Fatal("fixture does not contain the expected post-Cluster Tags element")
+		}
+		offset += next + len(tagsID)
+	}
+	r := NewReader(bytes.NewReader(raw), WithBufferSize(offset+1), WithAssemblerOptions(
+		fragment.WithMetadataComplete(
+			func(*fragment.Fragment, parser.ElementID) bool { return true },
+		),
+	))
+	_, m, err := r.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.FragmentNumber != "connect-real-0" {
+		t.Fatalf("FragmentNumber = %q, want connect-real-0", m.FragmentNumber)
+	}
+	if m.ContinuationToken != "" {
+		t.Fatalf("ContinuationToken = %q; eager emission must not see post-Cluster tags", m.ContinuationToken)
 	}
 }
 

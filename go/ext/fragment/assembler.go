@@ -149,14 +149,61 @@ func WithResync(notify func(offset int64, skipped int64, cause error)) Option {
 	return func(a *Assembler) { a.notify = notify }
 }
 
+// WithMetadataComplete decides, per fragment, when its Segment-level metadata is
+// settled and the fragment may be handed over EARLY -- before the point the
+// default rule would release it.
+//
+// WHY A FRAGMENT IS HELD AT ALL. A Cluster's end is not the end of its Segment's
+// metadata: RFC 9559 makes Tags cumulative and positionless, and a live stream
+// writes some of them AFTER the Cluster they describe -- Amazon Connect's KVS
+// output writes two Tags elements before its Cluster and two after. Handing the
+// fragment over at the Cluster's end therefore delivers a Segment view that is a
+// partial snapshot, with nothing in it to say so, and a consumer that reads tags at
+// delivery silently sees fewer than the stream stated. So a fragment is held until
+// the next Cluster begins, its Segment ends, or the input ends, whichever comes
+// first -- at which point every Segment-level element that precedes the next
+// Cluster has been retained. This is the DEFAULT and no option turns it off,
+// because it changes no error's terminality, only when an already-assembled
+// fragment is reachable.
+//
+// WHAT IT COSTS. Waiting for the next Cluster is the only ELEMENT-AGNOSTIC way to
+// know that no further Tags follow, so in a stream that puts one Cluster in each
+// document -- the KVS shape -- the hold lasts until the next document starts.
+// A consumer that KNOWS its stream's layout can do better, and this option is how:
+// done is consulted with the pending fragment and the ID of the element that just
+// completed, and releasing on the tag its producer writes last costs no latency at
+// all. The knowledge stays with the caller, exactly as the boundary rule stays with
+// matroska.StreamBoundary rather than inside parser.
+//
+// done is called when the fragment's own Cluster ends, and again whenever a direct
+// child of the Segment completes while the fragment is still held. Returning true
+// releases it immediately; a predicate that ALWAYS returns true therefore restores
+// emission at the Cluster's end:
+//
+//	fragment.WithMetadataComplete(func(*fragment.Fragment, parser.ElementID) bool {
+//	    return true // real-time analysis: take the partial snapshot knowingly
+//	})
+//
+// The pending fragment is the very one that will be delivered, so a predicate may
+// read it with Tag, Tags or Value; it must not be retained. A nil done restores the
+// default rule, so this option can never make a fragment disappear.
+func WithMetadataComplete(done func(pending *Fragment, completed parser.ElementID) bool) Option {
+	return func(a *Assembler) { a.metadataComplete = done }
+}
+
 // Assembler drives the streaming EBML cursor over a continuous Matroska byte
 // stream and assembles one Fragment per completed Cluster.
 //
 // Usage is push-based: feed arbitrary []byte chunks with Feed, which returns the
-// Fragments that completed within that chunk, then call Finalize once at EOF to
-// close the trailing unknown-size Segment and surface any structural error. The
-// result is split-invariant: the sequence of Fragments, and their contents, is
-// identical however the input bytes are chunked across Feed calls.
+// Fragments released within that chunk, then call Finalize once at EOF to close the
+// trailing unknown-size Segment, release anything still held, and surface any
+// structural error. The result is split-invariant: the sequence of Fragments, and
+// their contents, is identical however the input bytes are chunked across Feed
+// calls.
+//
+// A fragment is assembled at its Cluster's end and delivered once its Segment-level
+// metadata has settled, which is a wait of one Cluster by default -- see
+// WithMetadataComplete for what that buys and how to shorten it.
 //
 // Inside, it is a plain pull loop over a parser.Cursor and nothing more: every
 // decision it makes -- descend into this master, decline that subtree, take this
@@ -164,10 +211,11 @@ func WithResync(notify func(offset int64, skipped int64, cause error)) Option {
 // the node it just pulled, which is why this package needs no parsing of its own.
 // An Assembler is not safe for concurrent use.
 type Assembler struct {
-	reg         *matroska.Registry
-	maxPayload  int
-	notify      func(offset int64, skipped int64, cause error)
-	skipContent func(id parser.ElementID, offset int64, cause error)
+	reg              *matroska.Registry
+	maxPayload       int
+	notify           func(offset int64, skipped int64, cause error)
+	skipContent      func(id parser.ElementID, offset int64, cause error)
+	metadataComplete func(pending *Fragment, completed parser.ElementID) bool
 
 	// c is the cursor being pulled; nil only while a resync is pending.
 	c *parser.Cursor
@@ -182,6 +230,12 @@ type Assembler struct {
 	segment *tree.Element
 	cluster *tree.Element
 	blocks  []*parser.SimpleBlock
+
+	// pending is the assembled fragment waiting for its Segment-level metadata to
+	// settle -- see WithMetadataComplete. At most one is ever held: the next
+	// Cluster's header releases it, so a Segment with many Clusters never
+	// accumulates fragments.
+	pending *Fragment
 
 	// leaf is the node whose payload the assembler asked for and whose bytes have
 	// not all arrived, with leafEl the element that will retain them (nil for a
@@ -251,8 +305,16 @@ func segmentBoundary(open, next parser.ElementID) bool {
 }
 
 // Feed pushes a chunk of the stream into the assembler and returns every Fragment
-// whose Cluster completed while consuming it. The returned slice is freshly
-// allocated per call (nil when nothing completed) and owned by the caller.
+// RELEASED while consuming it. The returned slice is freshly allocated per call
+// (nil when nothing was released) and owned by the caller.
+//
+// Released, not assembled: a Fragment is assembled at its Cluster's end and then
+// held until its Segment-level metadata has settled -- until the next Cluster
+// begins, the Segment ends, or the input ends -- so that the Tags a live stream
+// writes AFTER a Cluster are in the Segment view the caller is handed. See
+// WithMetadataComplete, which is how a caller that knows its stream's layout
+// releases sooner. The SEQUENCE of Fragments is unaffected, and so is
+// split-invariance: what changes is which Feed call hands one over.
 //
 // An error is returned together with the Fragments that had completed before it,
 // so a malformed tail never discards a good prefix. Every error is terminal and
@@ -283,6 +345,9 @@ func (a *Assembler) Feed(chunk []byte) ([]*Fragment, error) {
 	}
 	a.c.Feed(chunk)
 	if err := a.drain(); err != nil {
+		// A held fragment was assembled BEFORE this failure, so it goes with the good
+		// prefix rather than being lost to it -- the rule Feed already states.
+		a.release()
 		if a.notify == nil || !parser.IsStructural(err) {
 			return a.emitted, a.fail(err)
 		}
@@ -352,6 +417,10 @@ func (a *Assembler) Finalize() ([]*Fragment, error) {
 	if err := a.drain(); err != nil {
 		return a.salvage(), a.fail(err)
 	}
+	// The input is over, so nothing more can arrive for a fragment still waiting on
+	// its metadata: the end of input is the last of the three points where the wait
+	// ends by itself.
+	a.release()
 	return a.emitted, nil
 }
 
@@ -365,6 +434,9 @@ func (a *Assembler) Finalize() ([]*Fragment, error) {
 // twice -- Finalize latches the error anyway, but the state a fragment now owns is
 // not left behind as this assembler's.
 func (a *Assembler) salvage() []*Fragment {
+	// A fragment held for its metadata is older than the salvaged one and is not the
+	// error's fault either, so it is handed over first and stream order holds.
+	a.release()
 	if a.cluster == nil {
 		return a.emitted
 	}
@@ -454,6 +526,9 @@ func (a *Assembler) master(n *parser.MasterNode) {
 
 	el := tree.FromNode(n)
 	if parent := a.top(); n.ID() == matroska.IDCluster && parent == a.segment {
+		// A new Cluster is the element-agnostic proof that no further Segment-level
+		// metadata can belong to the fragment before it: the wait is over.
+		a.release()
 		a.cluster, a.blocks = el, nil
 		el.SetRegistry(a.reg)
 	} else {
@@ -492,6 +567,7 @@ func (a *Assembler) leafHeader(n *parser.LeafNode) {
 	if a.maxPayload >= 0 && n.Size() > int64(a.maxPayload) {
 		el.Truncated = true
 		n.Skip()
+		a.settle(n.ID())
 		return
 	}
 	a.leaf, a.leafEl = n, el
@@ -541,13 +617,17 @@ func (a *Assembler) readPayload() (bool, error) {
 	if el != nil {
 		el.Payload = payload
 	}
+	// The element is complete now, so a held fragment's metadata may have just
+	// settled: settle itself checks that this leaf was a direct child of the Segment.
+	a.settle(node.ID())
 	return true, nil
 }
 
-// end reacts to a master's end. A Cluster's end is where a Fragment is emitted --
-// the early-emission point, reached as soon as the Cluster's declared size is
-// consumed -- and a Segment's end is where all Segment-scoped state is dropped, so
-// nothing leaks into the next Segment.
+// end reacts to a master's end. A Cluster's end is where a Fragment is ASSEMBLED --
+// reached as soon as the Cluster's declared size is consumed -- and a Segment's end
+// is where all Segment-scoped state is dropped, so nothing leaks into the next
+// Segment. Assembling is not delivering: the fragment is held until its
+// Segment-level metadata has settled, which is what release decides.
 func (a *Assembler) end(n *parser.EndNode) error {
 	el, err := a.pop(n)
 	if err != nil {
@@ -555,16 +635,46 @@ func (a *Assembler) end(n *parser.EndNode) error {
 	}
 	switch {
 	case el != nil && el == a.cluster:
-		a.emitted = append(a.emitted, &Fragment{
+		a.pending = &Fragment{
 			Segment: a.segment,
 			Cluster: a.cluster,
 			Blocks:  a.blocks,
-		})
+		}
 		a.cluster, a.blocks = nil, nil
+		a.settle(n.ID())
 	case el != nil && el == a.segment:
+		// The Segment is over, so no further metadata can arrive for the fragment
+		// it holds: this is one of the points where the wait ends by itself.
+		a.release()
 		a.resetSegment()
+	default:
+		a.settle(n.ID())
 	}
 	return nil
+}
+
+// settle asks the caller's predicate whether the held fragment's Segment-level
+// metadata is complete, and releases it if so. It is consulted only for an element
+// that completed as a DIRECT child of the Segment -- which is what the open stack
+// says once the element has been popped -- because a Segment's own children are the
+// metadata a fragment's view is made of.
+func (a *Assembler) settle(completed parser.ElementID) {
+	if a.pending == nil || a.metadataComplete == nil || a.top() != a.segment {
+		return
+	}
+	if a.metadataComplete(a.pending, completed) {
+		a.release()
+	}
+}
+
+// release hands over the held fragment, if any, preserving stream order: it is
+// always older than anything assembled afterwards.
+func (a *Assembler) release() {
+	if a.pending == nil {
+		return
+	}
+	a.emitted = append(a.emitted, a.pending)
+	a.pending = nil
 }
 
 func isNeedMoreData(err error) bool {
@@ -577,6 +687,9 @@ func isNeedMoreData(err error) bool {
 // recordFailure abandons the failed cursor, keeping the bytes it had not consumed
 // so recovery has something to scan forward through.
 func (a *Assembler) recordFailure(cause error) {
+	// Whatever was assembled before the failure survives it, including a fragment
+	// still waiting on its metadata: recovery discards bytes, never fragments.
+	a.release()
 	a.failOffset = a.c.Offset()
 	a.tail = a.c.Unconsumed()
 	a.tailStart = a.failOffset

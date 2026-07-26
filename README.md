@@ -363,7 +363,7 @@ uses a per-element allowlist.
 
 ### `ext/fragment`
 
-`fragment.New` assembles a continuous KVS GetMedia stream and emits one
+`fragment.New` assembles a continuous KVS GetMedia stream and produces one
 `*fragment.Fragment` per completed `Cluster`. It is a plain pull loop over
 `parser.Cursor` and is the worked example of building on the core. It retains generic element nodes,
 decodes `SimpleBlock`s into `Blocks`, and provides metadata and timing helpers:
@@ -414,8 +414,45 @@ func main() {
 granularity of its own; it changes nothing about the Fragments, since assembly is
 split-invariant.
 
+#### When a Fragment is delivered
+
+A Fragment is **assembled** when its `Cluster` closes and **delivered** once its
+Segment-level metadata has settled. Those are not the same moment, because a live
+stream writes some of that metadata *after* the Cluster it describes — Amazon
+Connect's KVS output writes two `Tags` elements before its `Cluster` and two after.
+Delivering at the Cluster's end would hand over a partial view with nothing in it
+to say so, and a consumer reading tags on receipt would silently see fewer than the
+stream stated.
+
+So by default a fragment is held until **the next `Cluster` begins, its `Segment`
+ends, or the input ends**, whichever comes first. At that point every
+Segment-level element preceding the next Cluster has been retained. This is not
+opt-in and changes no error's terminality — only when an already-assembled
+fragment becomes reachable.
+
+Waiting for the next Cluster is the only *element-agnostic* way to know that no
+further `Tags` follow, so in a stream that puts one Cluster per document — the KVS
+shape — the wait lasts until the next document starts. A consumer that knows its
+stream's layout pays nothing:
+
+| | Delivery |
+| --- | --- |
+| Default (`nil` predicate) | Next `Cluster`, `Segment` end, or end of input |
+| `WithMetadataComplete(pred)` | As soon as `pred` says the metadata is settled |
+| `WithMetadataComplete(always true)` | At the `Cluster`'s end — the eager snapshot, caveats included |
+
+```go
+// go/kvs knows that GetMedia writes the continuation token last, so it supplies
+// the predicate — exactly as matroska.StreamBoundary is supplied to
+// parser.WithBoundary. kvs.NewReader passes it already.
+asm := fragment.New(fragment.WithMetadataComplete(kvs.MetadataComplete))
+```
+
 Absolute block time is `(ClusterTimestamp + block.Timecode) * TimestampScale`;
-both operands are in scale units and the relative timecode is signed.
+both operands are in scale units and the relative timecode is signed. The origin
+is the Segment's own timeline, which Matroska does not fix: a stream that writes
+an epoch-based `Cluster.Timestamp`, as Amazon Connect does, yields an offset from
+the Unix epoch rather than an elapsed media time.
 
 A stream that ends **inside an element** — which is what every dropped live
 connection looks like — still reports its truncation from `Finalize`, and the

@@ -213,8 +213,20 @@ func TestBlockGroupInsideClusterSplitInvariance(t *testing.T) {
 				}
 				got = append(got, frags...)
 			}
+			// The document's trailing Tags is the last thing in it, so the fragment
+			// is still waiting on its Segment-level metadata until the input ends.
+			tail, err := a.Finalize()
+			if err != nil {
+				t.Fatalf("Finalize: %v", err)
+			}
+			got = append(got, tail...)
 			if len(got) != 1 || len(got[0].Blocks) != 2 {
 				t.Fatalf("got %d fragments and %d blocks, want 1 and 2", len(got), len(got[0].Blocks))
+			}
+			// Contents are split-invariant too, and that now includes the metadata
+			// written AFTER the Cluster: it is in the view whatever the chunking was.
+			if tag, ok := got[0].Tag("next"); !ok || tag != "document" {
+				t.Fatalf("trailing tag = %q, %v; want it settled before delivery", tag, ok)
 			}
 		})
 	}
