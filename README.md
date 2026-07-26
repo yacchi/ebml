@@ -501,6 +501,27 @@ all**, and it does not include a GetMedia API wrapper: callers provide the
 already-obtained byte stream. This package is not affiliated with, endorsed by,
 or sponsored by Amazon Web Services; AWS service names appear descriptively only.
 
+Being a separate module means it needs its **own** requirement: adding
+`github.com/yacchi/ebml` does not make `github.com/yacchi/ebml/kvs` resolvable,
+and `go list github.com/yacchi/ebml/kvs` reports `no required module provides
+package` until the second one is named too.
+
+```bash
+go get github.com/yacchi/ebml
+go get github.com/yacchi/ebml/kvs
+```
+
+In a workspace, both directories are listed:
+
+```
+go 1.25
+
+use (
+	./ebml/go
+	./ebml/go/kvs
+)
+```
+
 ```go
 package main
 
