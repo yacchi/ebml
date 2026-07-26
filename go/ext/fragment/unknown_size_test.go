@@ -131,8 +131,14 @@ func TestConnectRealShapeUnknownClusterEmitsWithoutFinalize(t *testing.T) {
 	}
 }
 
-// Q3 in KVS-CONSUMER-FEEDBACK.md is an open design question, not an endorsed
-// limitation: post-Cluster metadata is outside the emitted Fragment's scope.
+// Q3 in KVS-CONSUMER-FEEDBACK.md asked how metadata written AFTER the Cluster it
+// describes should reach a consumer. It is settled, and the answer is that no
+// notification mechanism exists or will: a Fragment is a snapshot taken when its
+// Cluster closed, so post-Cluster metadata is outside it by construction. A
+// consumer that needs those tags reads them from ext/scope, whose Observe hands
+// back the finished scope -- for the shape this was reported against, that
+// arrives before the next fragment's payload does. This test pins the boundary,
+// not a deficiency.
 func TestPostClusterTagsAreNotInTheEmittedFragment(t *testing.T) {
 	raw := loadHex(t, "connect_real_shape")
 	tagsID := []byte{0x12, 0x54, 0xc3, 0x67}

@@ -57,8 +57,11 @@ func TestReaderSplitInvariant(t *testing.T) {
 	}
 }
 
-// Q3 in KVS-CONSUMER-FEEDBACK.md is an open design question: the consumer API
-// currently sees only metadata that preceded the emitted unknown-size Cluster.
+// Q3 in KVS-CONSUMER-FEEDBACK.md is settled: Metadata describes the fragment as
+// it stood when its Cluster closed, so it carries the tags written before the
+// Cluster and not those written after. No notification of later metadata is
+// provided; a consumer that needs the continuation token reads it from
+// ext/scope, whose finished scope arrives before the next fragment's payload.
 func TestReaderConnectRealShapeMetadataScope(t *testing.T) {
 	raw := fixture(t, "connect_real_shape")
 	tagsID := []byte{0x12, 0x54, 0xc3, 0x67}
