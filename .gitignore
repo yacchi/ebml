@@ -19,6 +19,11 @@
 dist/
 coverage.out
 
+# go.work IS committed: both modules are developed together, and the pinned
+# core version would otherwise hide local changes. Its sum file is regenerated
+# on demand and says nothing a module's own go.sum does not.
+go.work.sum
+
 # Fetched-on-demand spec documents. The IETF CELLAR EBML Schemas are CC-BY-4.0
 # works and are never committed here; the conformance-check skill downloads
 # them into this cache when it needs them.

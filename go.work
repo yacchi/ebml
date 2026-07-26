@@ -1,0 +1,11 @@
+// Local development spans both modules: integrations/kvs requires the core by
+// a published pseudo-version, so without this workspace a change to the core
+// would not be visible to the integration until it was pushed and the pin
+// bumped. Consumers never see this file -- it sits above both module roots and
+// so is in neither module's zip.
+go 1.25
+
+use (
+	./impl/go
+	./impl/go/integrations/kvs
+)

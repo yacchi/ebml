@@ -951,11 +951,25 @@ commented fixture format.
 
 How to require `kvs` from outside is under
 [the `integrations/kvs` module](#amazon-kinesis-video-streams-the-integrationskvs-module)
-above. Inside this repository there is one more thing to know:
-`integrations/kvs/go.mod` carries `replace github.com/yacchi/ebml/impl/go => ../../`,
-which stays until the core module has its first tagged release. A change spanning
-both modules therefore has to land in ONE commit, since the intermediate state
-would leave `kvs` red.
+above. Inside this repository there are two things to know.
+
+`integrations/kvs/go.mod` requires the core by a **published version**, and the
+root `go.work` is what makes local work resolve it from the tree instead of the
+proxy. It carried a `replace` instead until that was found to make the module
+unresolvable for everyone else: a `replace` in a DEPENDENCY's `go.mod` is
+ignored — only the main module's applies — so a consumer saw the unsatisfiable
+`v0.0.0` and nothing else.
+
+The requirement is a MINIMUM, as every Go requirement is, so it moves only when
+`kvs` needs a core API newer than the pin. When it does, the core change has to
+be PUSHED before the pin can name it, so that pair of changes is two commits and
+not one. Everything else spanning both modules is a single commit, because the
+workspace already builds `kvs` against the working tree.
+
+```bash
+# From integrations/kvs, after the core commit is pushed:
+GOWORK=off go get github.com/yacchi/ebml/impl/go@main
+```
 
 ### Releasing
 
@@ -968,9 +982,8 @@ impl/go/v0.1.0
 impl/go/integrations/kvs/v0.1.0
 ```
 
-The core is tagged first. Only once `github.com/yacchi/ebml/impl/go` resolves
-from the module proxy can `integrations/kvs` drop its `replace` and require the
-core by version.
+The core is tagged first, and `integrations/kvs` then requires that tag in place
+of the pseudo-version, so a release names a release rather than a commit.
 
 ## Build and test
 

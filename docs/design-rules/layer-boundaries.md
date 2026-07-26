@@ -27,8 +27,20 @@ it would repeat in every consumer's import line forever.
 
 Because the modules are in subdirectories, their version tags carry the
 subdirectory as a prefix — `impl/go/v0.1.0` and
-`impl/go/integrations/kvs/v0.1.0` — and the core is tagged FIRST, since the
-integration's `replace` comes out only once the core resolves.
+`impl/go/integrations/kvs/v0.1.0` — and the core is tagged FIRST, so that the
+integration can require a release rather than a commit.
+
+An integration requires the core by a PUBLISHED VERSION, never by a `replace`,
+and the root `go.work` is what makes local work resolve it from the tree.
+`integrations/kvs` carried `require v0.0.0` plus
+`replace github.com/yacchi/ebml/impl/go => ../../` until that was found to make
+the module unresolvable for everyone outside the repository: a `replace` in a
+DEPENDENCY's `go.mod` is ignored, only the main module's applies, so a consumer
+saw the unsatisfiable `v0.0.0` and nothing else. Waiting for a tag was never the
+constraint either — a pseudo-version resolves the moment the repository is
+public, which is why the pin went in before any tag existed. `internal/archtest`
+cannot see this one, so CI resolves the integration WITHOUT the workspace and
+fails if the pin does not stand on its own.
 
 The repository directory is still named `ebml-reader`; that is intentional and
 carries no meaning.

@@ -70,6 +70,34 @@ jobs:
           flags: ${{ matrix.flag }}
           fail_ci_if_error: true
 
+  # The jobs above run under the root go.work, which resolves the core from the
+  # tree. That is what a contributor wants and exactly what a CONSUMER does not
+  # get: they see integrations/kvs's requirement and nothing else. This job
+  # builds it the way they resolve it, so a requirement that only works inside
+  # the workspace -- which is what `replace` amounted to -- fails here.
+  published-resolution:
+    name: kvs resolves as published
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: impl/go/integrations/kvs/go.mod
+          cache: false
+
+      - name: Build and test against the required core
+        run: go test ./...
+        working-directory: impl/go/integrations/kvs
+
+      - name: Assert go.mod and go.sum are already tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+        working-directory: impl/go/integrations/kvs
+
   fixtures:
     name: corpus is reproducible
     runs-on: ubuntu-latest
