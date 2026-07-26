@@ -295,8 +295,8 @@ func copyOf(t *testing.T, n Node) Node {
 // retention out of the guarantee.
 //
 // Should the cursor ever start reusing instances again, it fails here, and the
-// carve-out would have to come back into Node's doc, README.md and spec/SPEC.md
-// section 3 with it.
+// carve-out would have to come back into Node's doc, go/README.md and
+// spec/SPEC.md section 3 with it.
 func TestNodeIsAllocatedPerEvent(t *testing.T) {
 	raw := loadHexFixture(t, "fixtures/kvs/known_size_cluster.ebml.hex")
 

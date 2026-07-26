@@ -94,7 +94,8 @@ carries no meaning.
   event (`allocsPerEvent` in `go/parser/node_validity_test.go`), with
   `BenchmarkCursorScan`/`BenchmarkParserScan` pricing it against `parser.Parser`, the
   surface for a consumer that needs no node. Keep that statement identical in `Node`'s
-  doc, `README.md` and `spec/SPEC.md` section 3 — never widen the claim in one of them.
+  doc, `go/README.md` and `spec/SPEC.md` section 3 — never widen the claim in one of
+  them.
   A method added to a node type must take the same check (`nodeExtent.fresh`) and is
   covered automatically by the reflection-driven tables in
   `go/parser/node_validity_test.go`.
@@ -473,13 +474,16 @@ go run ./examples/getmedia
 Fixtures under `fixtures/**/*.ebml.hex` are commented hexadecimal and entirely
 synthetic. Golden files under `golden/**/*.jsonl` contain one JSON object per
 cursor operation. Split definitions are in `tests/split_patterns.json`.
-`spec/SPEC.md` is the normative portable contract; `README.md` documents the
-core first and then the optional Go extensions. `go/README.md` is a MAP of the Go
-implementation — package inventory, the dependency direction `internal/archtest`
-enforces, entry-point selection, commands — and deliberately carries NO policy
-prose: it points at whichever doc owns each rule, because a second copy of a
-policy is how the stream-boundary rule's three copies came to disagree. Keep it
-that way; a rule stated there is a rule that will go stale there. `docs/` holds the design notes
+`spec/SPEC.md` is the normative portable contract. The root `README.md` is
+LANGUAGE-NEUTRAL and stays that way: what the library is, the contract, the
+implementation table, and what every implementation shares (the corpus at the
+repository root, which is why it lives there). It shows no code in any one
+language, so a second implementation costs it one table row and nothing else.
+`go/README.md` is the whole of the Go documentation — the package map, the
+dependency direction `internal/archtest` enforces, entry-point selection, usage
+core-first then extensions, and the commands. Go usage has exactly ONE home;
+never restate it at the root, and never add a per-language section there.
+`docs/` holds the design notes
 that are too long for a package doc and are NOT normative — a note that
 contradicts `spec/SPEC.md` is the thing that is wrong. Each note is listed in
 `docs/README.md`; a new one goes there in the same change.
