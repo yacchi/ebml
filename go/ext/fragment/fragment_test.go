@@ -22,7 +22,7 @@ import (
 
 // Well-known AWS KVS tag names used by the fixtures under fixtures/kvs/. These
 // are consumer conventions, not part of the generic fragment package API; see
-// go/kvs/examples/getmedia for how a real consumer reads them through Fragment.Tag.
+// go/integrations/kvs/examples/getmedia for how a real consumer reads them through Fragment.Tag.
 const (
 	tagFragmentNumber    = "AWS_KINESISVIDEO_FRAGMENT_NUMBER"
 	tagContinuationToken = "AWS_KINESISVIDEO_CONTINUATION_TOKEN"

@@ -46,7 +46,7 @@
 // Tracks, Track, TrackByName, TimestampScale, ClusterTimestamp, BlockTime,
 // StartTime, EndTime, TrackPCM and TrackPCMByName.
 //
-// For an Amazon KVS GetMedia consumer, see go/kvs/examples/getmedia.
+// For an Amazon KVS GetMedia consumer, see go/integrations/kvs/examples/getmedia.
 package fragment
 
 import (

@@ -121,12 +121,34 @@ carries no meaning.
   `ext/tags` applied to `Target{}`, and `ext/tags` imported `ext/scope` for the
   `Read(*scope.Scope)` above. A convenience accessor is exactly how such an edge
   grows back, which is why the rule is a TEST and not a paragraph. A consumer
-  composes the two, as `go/kvs` does. `ext/fragment` therefore offers NO tag
+  composes the two, as `go/integrations/kvs` does. `ext/fragment` therefore offers NO tag
   accessor: a fragment's tags are `tags.Read(frag.Segment)`, which also stops the
   per-call rebuild the methods hid — five names cost five walks of the Segment
   where one `Set` answers all five. A TEST may still import a sibling ext package
   (`go list -deps` reports the shipped, non-test graph), and proving that
   `ext/tags` reads what `ext/fragment` retains is what such a test is for.
+* A layer that adapts to ONE NAMED OUTSIDE SYSTEM — a hosted service, a
+  specification, a container profile — is an INTEGRATION and lives in
+  `go/integrations/<name>/` as its OWN MODULE, never in the core and never in
+  `ext/`. What defines the layer is that it MAY IMPORT SEVERAL `ext` PACKAGES:
+  `integrations/kvs` reads fragments through `ext/fragment` and their tags through
+  `ext/tags`, which is exactly the composition the leaf rule above forbids inside
+  `ext/`, so `ext/kvs` was never available. Integrations do not import each other,
+  for the same reason ext packages do not. The directory is not called `services`
+  because the first one being a service is an accident of order: a SPECIFICATION
+  that fixes a Matroska usage belongs here on identical terms, and naming the
+  layer after its first inhabitant would have had to be undone by the second.
+  An integration holds the outside system's EBML/Matroska CONVENTIONS AND
+  VOCABULARY ONLY — which tags it writes, how it lays out documents, how its
+  timestamps map to a wall clock — and never that system's API or transport: bytes
+  are supplied by the caller, so `integrations/kvs` has no GetMedia wrapper, no
+  client and no AWS SDK dependency. That line answers a question a consumer asked
+  outright (`plans/KVS-FULL-MIGRATION-REQUIREMENTS.md`, requirement 4), which is
+  why it is written down rather than left to inference; moving it means amending
+  `go/integrations/doc.go` first, so the change is a decision on the record and not
+  one module quietly growing a client. Being separate modules is what keeps a
+  dependency, a vocabulary and a release cadence belonging to one outside system
+  out of the core's.
 * The reading core has exactly ONE surface: a streaming pull operation, `Cursor.Next`,
   returning a closed `Node` (`*MasterNode`/`*LeafNode`/`*EndNode`) one event at a
   time, not a document model. Never add a second push or callback event shape.
@@ -323,7 +345,7 @@ carries no meaning.
   `WithMetadataComplete` is the one escape and takes a CALLER-SUPPLIED predicate,
   exactly as `parser.WithBoundary` takes `matroska.StreamBoundary` — which is why
   `kvs.MetadataComplete` (release on the continuation token GetMedia writes last)
-  lives in `go/kvs` and `ext/fragment` still knows no tag name. A predicate that
+  lives in `go/integrations/kvs` and `ext/fragment` still knows no tag name. A predicate that
   always returns true IS the old eager emission, which is why there is no second
   option for it; its view is read-size dependent by nature and that is documented
   where it is offered, never hidden.
@@ -417,7 +439,7 @@ The core is working and tested:
 * `go/stream` owns an `io.Reader` and answers `NeedMoreData` while driving a
   cursor. Its whole reading surface is `Nodes() iter.Seq2[parser.Node, error]`;
   there is no exported `Next`, and `stream` is the working proof of the arity rule
-  above. The CLI's private stream driver is gone; `go/kvs.Reader` remains a
+  above. The CLI's private stream driver is gone; `integrations/kvs.Reader` remains a
   byte-oriented assembler driver because it consumes `Assembler.Feed`, not cursor
   nodes.
 * `go/ext/scope` (ext: a way of USING the core, not part of the agreement) tracks any master and the elements that completed directly
@@ -432,9 +454,9 @@ The core is working and tested:
   Segment-default tags are cumulative and positionless, repeated names are
   last-wins by library choice. It is the only tag-traversal implementation and
   the only place tag accessors live: `ext/fragment` has none of its own.
-* `go/kvs` is a separate module holding all KVS-specific tag and metadata
-  knowledge; the core module has no KVS element or tag knowledge left. The
-  runnable example moved to `go/kvs/examples/getmedia`.
+* `go/integrations/kvs` is a separate module holding all KVS-specific tag and
+  metadata knowledge; the core module has no KVS element or tag knowledge left.
+  The runnable example is `go/integrations/kvs/examples/getmedia`.
 * The module is `github.com/yacchi/ebml`, and the CLI is `ebml` under
   `go/cmd/ebml`. The public `go/writer` package replaced the four private
   encoders formerly in `internal/kvsgen`, `tree/tree_test.go`,
@@ -515,7 +537,7 @@ go -C go run ./internal/specconform/checkschema \
   -schema ../.spec-cache/ebml.xml -schema ../.spec-cache/ebml_matroska.xml -missing
 ```
 
-Run the separate KVS module commands from `go/kvs/`:
+Run the separate KVS module commands from `go/integrations/kvs/`:
 
 ```bash
 go test ./...

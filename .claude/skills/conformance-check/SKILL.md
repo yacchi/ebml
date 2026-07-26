@@ -151,5 +151,5 @@ feature first; the check then follows for free.
 * The Matroska test files (`ietf-wg-cellar/matroska-test-files`, ~185 MB, no
   license statement in the repository) are not used here. Real-file validation
   is a separate, opt-in exercise.
-* `matroska_tags.xml` (the official tag definitions) is not checked; `go/kvs`
+* `matroska_tags.xml` (the official tag definitions) is not checked; `go/integrations/kvs`
   carries vendor tag knowledge that has no schema counterpart.

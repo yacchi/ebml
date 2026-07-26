@@ -8,14 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yacchi/ebml/kvs"
+	"github.com/yacchi/ebml/integrations/kvs"
 )
 
 // loadFixture decodes a committed fixtures/kvs/<name>.ebml.hex file (comment
 // lines beginning with '#' stripped) into the raw EBML byte stream.
 func loadFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "..", "fixtures", "kvs", name+".ebml.hex")
+	path := filepath.Join("..", "..", "..", "..", "..", "fixtures", "kvs", name+".ebml.hex")
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read fixture %s: %v", name, err)

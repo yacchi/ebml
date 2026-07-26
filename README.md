@@ -184,6 +184,6 @@ Apache-2.0 (`SPDX-License-Identifier: Apache-2.0`). See [LICENSE](LICENSE).
 
 This project is not affiliated with, endorsed by, or sponsored by Amazon Web
 Services. The fixture corpus and the runnable example under
-[`go/kvs/examples/getmedia`](go/kvs/examples/getmedia) are written for use with
+[`go/integrations/kvs/examples/getmedia`](go/integrations/kvs/examples/getmedia) are written for use with
 Amazon Kinesis Video Streams; that service name appears here descriptively only,
 and all fixture data is synthetic.

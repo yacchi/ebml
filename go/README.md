@@ -1,7 +1,8 @@
 # `go/` — the Go implementation
 
-The Go module `github.com/yacchi/ebml`, plus a second module
-`github.com/yacchi/ebml/kvs` under `kvs/`. This is the Go documentation: the map of
+The Go module `github.com/yacchi/ebml`, plus one module per integration —
+currently `github.com/yacchi/ebml/integrations/kvs` under `integrations/kvs/`.
+This is the Go documentation: the map of
 the packages, then how to use them. The repository root stays language-neutral, so
 nothing about Go lives above this file.
 
@@ -18,7 +19,8 @@ surfaces use the standard-library `iter` support.
 ## Packages
 
 The core is what a port must agree on; `ext/` is Go convenience built only on
-exported core API.
+exported core API; `integrations/` adapts to one named outside system and is a
+separate module per system.
 
 | Package | Kind | What it is |
 | --- | --- | --- |
@@ -31,7 +33,7 @@ exported core API.
 | `ext/scope` | ext | Tracks one master and the elements that completed directly inside it. |
 | `ext/tags` | ext | Target-aware views over retained `Tags`. The only tag-traversal implementation, and the only place tag accessors live. |
 | `ext/fragment` | ext | Assembles one `Fragment` per completed `Cluster`, with recovery and delivery options. |
-| `kvs` | separate module | All Amazon KVS knowledge: tag names, typed `Metadata`, wall-clock times, `MetadataComplete`. No AWS SDK dependency. |
+| `integrations/kvs` | integration (separate module) | All Amazon KVS knowledge: tag names, typed `Metadata`, wall-clock times, `MetadataComplete`. Conventions only — no AWS SDK dependency and no GetMedia wrapper. |
 | `cmd/ebml` | binary | The `ebml` CLI: `dump` and `xml`, both driving `stream`. |
 
 ## Dependency direction
@@ -53,7 +55,8 @@ parser  crc                 <- import nothing from this module
 ext/scope    -> core                    <- every ext package is a leaf:
 ext/tags     -> core                       none imports another
 ext/fragment -> core
-kvs          -> ext/fragment + ext/tags + core      (module 2)
+
+integrations/kvs -> ext/fragment + ext/tags + core   (its own module)
 ```
 
 Three rules are enforced, not merely intended: `parser` never imports `tree` (the
@@ -61,6 +64,13 @@ StAX reader may not reach retained document state), no core package imports
 anything from `ext/`, and **no `ext` package imports another `ext` package**. An
 `ext` package is a way of USING the core, and a way of using something is not a
 prerequisite of another way of using it.
+
+Composing several of those ways is what an integration does, and it is why
+`integrations/` is a layer of its own rather than more of `ext/`: `kvs` reads
+fragments through `ext/fragment` and their tags through `ext/tags`, so it could
+not live under `ext/` without breaking the leaf rule. `integrations/doc.go`
+states the rest of the policy — conventions only, never the outside system's API
+or transport, and no integration imports another.
 
 That third rule is recent, and both edges it removed were the same mistake:
 `ext/fragment` imported `ext/tags` for `Fragment.Tag`/`Tags`, which were
@@ -520,7 +530,7 @@ stream's layout pays nothing:
 | `WithMetadataComplete(always true)` | At the `Cluster`'s end — the eager snapshot, caveats included |
 
 ```go
-// go/kvs knows that GetMedia writes the continuation token last, so it supplies
+// go/integrations/kvs knows that GetMedia writes the continuation token last, so it supplies
 // the predicate — exactly as matroska.StreamBoundary is supplied to
 // parser.WithBoundary. kvs.NewReader passes it already.
 asm := fragment.New(fragment.WithMetadataComplete(kvs.MetadataComplete))
@@ -669,22 +679,23 @@ func main() {
 }
 ```
 
-## Amazon Kinesis Video Streams: the `kvs` submodule
+## Amazon Kinesis Video Streams: the `integrations/kvs` module
 
-`github.com/yacchi/ebml/kvs` is a separate Go module so the core module never
-carries AWS-specific dependencies. It currently has **no AWS SDK dependency at
+`github.com/yacchi/ebml/integrations/kvs` is an integration: a separate Go
+module holding one outside system's Matroska conventions, so the core module
+never carries AWS-specific dependencies. It currently has **no AWS SDK dependency at
 all**, and it does not include a GetMedia API wrapper: callers provide the
 already-obtained byte stream. This package is not affiliated with, endorsed by,
 or sponsored by Amazon Web Services; AWS service names appear descriptively only.
 
 Being a separate module means it needs its **own** requirement: adding
-`github.com/yacchi/ebml` does not make `github.com/yacchi/ebml/kvs` resolvable,
-and `go list github.com/yacchi/ebml/kvs` reports `no required module provides
+`github.com/yacchi/ebml` does not make `github.com/yacchi/ebml/integrations/kvs` resolvable,
+and `go list github.com/yacchi/ebml/integrations/kvs` reports `no required module provides
 package` until the second one is named too.
 
 ```bash
 go get github.com/yacchi/ebml
-go get github.com/yacchi/ebml/kvs
+go get github.com/yacchi/ebml/integrations/kvs
 ```
 
 In a workspace, both directories are listed:
@@ -694,7 +705,7 @@ go 1.25
 
 use (
 	./ebml/go
-	./ebml/go/kvs
+	./ebml/go/integrations/kvs
 )
 ```
 
@@ -706,7 +717,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/yacchi/ebml/kvs"
+	"github.com/yacchi/ebml/integrations/kvs"
 )
 
 func main() {
@@ -746,9 +757,9 @@ exactly what the fragment carried.
 
 ### `examples/getmedia`
 
-`go/kvs/examples/getmedia` is a runnable, end-to-end demonstration of driving
+`go/integrations/kvs/examples/getmedia` is a runnable, end-to-end demonstration of driving
 the module over a live Amazon Connect KVS GetMedia byte stream. Run it from
-`go/kvs`.
+`go/integrations/kvs`.
 
 ## Writing
 
@@ -905,10 +916,10 @@ commented fixture format.
 ## Working across the two modules
 
 How to require `kvs` from outside is under
-[the `kvs` submodule](#amazon-kinesis-video-streams-the-kvs-submodule) above.
-Inside this repository there is one more thing to know: `kvs/go.mod` carries
-`replace github.com/yacchi/ebml => ../`, which stays until the core module has
-its first tagged release. A change spanning both modules therefore has to land in
+[the `integrations/kvs` module](#amazon-kinesis-video-streams-the-integrationskvs-module)
+above. Inside this repository there is one more thing to know:
+`integrations/kvs/go.mod` carries `replace github.com/yacchi/ebml => ../../`,
+which stays until the core module has its first tagged release. A change spanning both modules therefore has to land in
 ONE commit, since the intermediate state would leave `kvs` red.
 
 ## Build and test
@@ -921,7 +932,7 @@ go vet ./...
 go run ./internal/kvsgen/genfixtures   # regenerate ../fixtures/kvs and ../golden/kvs
 ```
 
-From `kvs/`:
+From `integrations/kvs/`:
 
 ```bash
 go test ./...

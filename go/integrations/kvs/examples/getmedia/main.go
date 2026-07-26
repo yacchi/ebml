@@ -15,7 +15,7 @@
 //   - the Cluster timestamp and the fragment's first block time
 //   - per-track decoded PCM byte counts
 //
-// Usage (run from the go/kvs/ directory):
+// Usage (run from the go/integrations/kvs/ directory):
 //
 //	go run ./examples/getmedia path/to/stream.mkv   # from a file
 //	some-getmedia-source | go run ./examples/getmedia # or from stdin
@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"github.com/yacchi/ebml/ext/fragment"
-	"github.com/yacchi/ebml/kvs"
+	"github.com/yacchi/ebml/integrations/kvs"
 	"github.com/yacchi/ebml/matroska"
 )
 
