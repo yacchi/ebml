@@ -670,3 +670,33 @@ func (fakeRegistry) Describe(parser.ElementID) string { return "OVERRIDDEN!" }
 func (fakeRegistry) TypeFor(parser.ElementID) (matroska.ValueType, bool) {
 	return matroska.TypeBinary, true
 }
+
+// TestFromNodeCopiesIdentityAndExtentOnly pins what a retained element must take
+// from a node while the node is still the current event, and what it must not.
+// The payload is absent by design: delivering it is a flow-control decision that
+// belongs to whoever holds the node, and the bytes a cursor hands out are a view
+// of its own buffer.
+func TestFromNodeCopiesIdentityAndExtentOnly(t *testing.T) {
+	raw := ebmltest.Encode(ebmltest.Master(matroska.IDSegment,
+		ebmltest.UTF8(matroska.IDDocType, "matroska"),
+	))
+	c := parser.NewCursor(matroska.KindForElementID)
+	c.Feed(raw)
+
+	node, err := c.Next()
+	if err != nil {
+		t.Fatalf("Next: %v", err)
+	}
+	el := tree.FromNode(node)
+
+	if el.ID != node.ID() || el.Offset != node.Offset() ||
+		el.HeaderLen != node.HeaderLen() || el.Size != node.Size() {
+		t.Errorf("FromNode = %+v, does not match the node's identity and extent", el)
+	}
+	if el.Payload != nil {
+		t.Errorf("FromNode set Payload = %v, want nil: retention of bytes is the caller's decision", el.Payload)
+	}
+	if len(el.Children) != 0 || el.Parent() != nil {
+		t.Error("FromNode returned a linked element; it must be unlinked")
+	}
+}

@@ -106,6 +106,28 @@ type Element struct {
 	registry Registry
 }
 
+// FromNode builds an unlinked retained element from the node a cursor just
+// reported. It copies IDENTITY AND EXTENT ONLY -- element ID, header offset,
+// header length and declared size -- because a node is valid solely until the
+// next pull, so anything a retained element needs must be taken from it now.
+//
+// The header length is copied as observed and is never recomputed: that is what
+// preserves a legal but non-minimal size-VINT width, and so what makes
+// parse-then-marshal byte-identical (spec/SPEC.md section 4).
+//
+// A leaf's Payload is deliberately NOT set here. Payload delivery is a
+// flow-control decision that belongs to whoever holds the node, and the bytes a
+// cursor hands out are a view of its own buffer -- a caller that retains them
+// assigns its own copy (bytes.Clone) to the returned element.
+func FromNode(n parser.Node) *Element {
+	return &Element{
+		ID:        n.ID(),
+		Offset:    n.Offset(),
+		HeaderLen: n.HeaderLen(),
+		Size:      n.Size(),
+	}
+}
+
 // newElement builds an unlinked tree node from a header that was just consumed,
 // the absolute stream offset that header started at, and the registry the tree
 // resolves element knowledge through.

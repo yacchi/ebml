@@ -387,7 +387,7 @@ func (a *Assembler) drain() error {
 // Fragment could hold it.
 func (a *Assembler) master(n *parser.MasterNode) {
 	if n.ID() == matroska.IDSegment && a.segment == nil {
-		a.segment = newElement(n)
+		a.segment = tree.FromNode(n)
 		a.segment.SetRegistry(a.reg)
 		a.push(a.segment)
 		n.Descend()
@@ -406,7 +406,7 @@ func (a *Assembler) master(n *parser.MasterNode) {
 		return
 	}
 
-	el := newElement(n)
+	el := tree.FromNode(n)
 	if parent := a.top(); n.ID() == matroska.IDCluster && parent == a.segment {
 		a.cluster, a.blocks = el, nil
 		el.SetRegistry(a.reg)
@@ -433,7 +433,7 @@ func (a *Assembler) leafHeader(n *parser.LeafNode) {
 		n.Skip()
 		return
 	}
-	el := newElement(n)
+	el := tree.FromNode(n)
 	parent.AppendChild(el)
 
 	if n.ID() == matroska.IDSimpleBlock && a.cluster != nil {
@@ -625,18 +625,6 @@ func (a *Assembler) compactTail() {
 }
 
 // ---- retention bookkeeping ----
-
-// newElement retains the identity and extent of the node the cursor just reported.
-// Only these four fields are copied, because a node is valid solely until the next
-// pull.
-func newElement(n parser.Node) *tree.Element {
-	return &tree.Element{
-		ID:        n.ID(),
-		Offset:    n.Offset(),
-		HeaderLen: n.HeaderLen(),
-		Size:      n.Size(),
-	}
-}
 
 func (a *Assembler) push(el *tree.Element) {
 	a.open = append(a.open, el)

@@ -95,6 +95,21 @@ carries no meaning.
   shape — a conformance corpus for a reader nobody ships. Never reintroduce a
   copy; a golden produced by a rule the library does not use is worse than no
   golden, because it looks like evidence.
+* Turning a cursor node into a retained element happens in exactly ONE place,
+  `tree.FromNode`. It copies identity and extent only — a node is valid solely
+  until the next pull, so a retained element takes what it needs immediately —
+  and never sets `Payload`, because delivering bytes is a flow-control decision
+  belonging to whoever holds the node. `ext/scope` and `ext/fragment` both call
+  it; they each carried an identical copy before.
+* `ext/fragment.Assembler` is deliberately NOT built on `ext/scope.Tracker`, and
+  a future reader should not "fix" that. They retain different things: the
+  assembler builds ONE nested tree spanning Segment and Cluster, elides
+  `SimpleBlock` payloads into decoded blocks with `Truncated` set, retries a
+  payload ACROSS `Feed` calls, and never skips a master — which is why its
+  EndNode-paired stack is safe where a Tracker must unwind on depth. Merging
+  them would either bloat `Tracker` for a single caller or change
+  `Fragment.Segment`, whose shared-and-growing contract is documented and
+  relied on.
 * `CloseMaster` is explicit boundary closure only. It accepts an unknown-size
   master, or a known-size master already at its declared end, and rejects a
   known-size master with payload outstanding (`PrematureCloseError`); a

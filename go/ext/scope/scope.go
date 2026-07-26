@@ -78,15 +78,15 @@ func (t *Tracker) Observe(n parser.Node) (done *Scope, err error) {
 				start:  node.Offset(),
 				end:    -1,
 			}
-			el := element(node)
+			el := tree.FromNode(node)
 			t.stack = append(t.stack, openElement{element: el, depth: node.Depth()})
 			return done, nil
 		}
-		el := element(node)
+		el := tree.FromNode(node)
 		t.stack = append(t.stack, openElement{element: el, depth: node.Depth()})
 	case *parser.LeafNode:
 		if t.current != nil && len(t.stack) > 0 {
-			el := element(node)
+			el := tree.FromNode(node)
 			el.Payload = payload
 			t.stack[len(t.stack)-1].element.AppendChild(el)
 			if len(t.stack) == 1 {
@@ -250,13 +250,4 @@ func (t *Tracker) closeTop(end int64) *Scope {
 	done := t.current
 	t.current = nil
 	return done
-}
-
-func element(n parser.Node) *tree.Element {
-	return &tree.Element{
-		ID:        n.ID(),
-		Offset:    n.Offset(),
-		HeaderLen: n.HeaderLen(),
-		Size:      n.Size(),
-	}
 }
