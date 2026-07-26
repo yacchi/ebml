@@ -34,7 +34,8 @@ comment:
   layout: "reach, diff, flags, files"
   require_changes: true
 
-ignore:
-  # Generated corpus and the tool that writes it: covered by the CI job that
-  # regenerates them and asserts the tree is unchanged, not by line coverage.
-  - "impl/go/internal/kvsgen/genfixtures/**"
+# Nothing is ignored. The measurement is made honest in CI instead, by giving
+# `go test` -coverpkg=./... so a package is credited for the code its tests
+# actually run: the helper packages the suite leans on hardest had no tests of
+# their own and so scored 0.0%, which an ignore list would have hidden rather
+# than fixed.

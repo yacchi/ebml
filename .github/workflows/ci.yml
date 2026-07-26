@@ -51,8 +51,15 @@ jobs:
         run: go vet ./...
         working-directory: ${{ matrix.dir }}
 
+      # -coverpkg=./... credits a package for the code its tests actually run,
+      # not just for the code its own tests declare. internal/ebmltest,
+      # internal/kvsgen and internal/ebmltrace have no tests of their own and
+      # are exercised by every other package, so the default measurement scored
+      # them 0.0% and reported the module 11 points below what the suite covers.
+      # The flag is module-scoped, so the core module's code is still not
+      # credited to the kvs flag.
       - name: Test
-        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+        run: go test -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
         working-directory: ${{ matrix.dir }}
 
       - name: Upload coverage
