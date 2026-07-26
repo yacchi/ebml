@@ -225,7 +225,7 @@ func TestBlockGroupInsideClusterSplitInvariance(t *testing.T) {
 			}
 			// Contents are split-invariant too, and that now includes the metadata
 			// written AFTER the Cluster: it is in the view whatever the chunking was.
-			if tag, ok := got[0].Tag("next"); !ok || tag != "document" {
+			if tag, ok := fragTag(got[0], "next"); !ok || tag != "document" {
 				t.Fatalf("trailing tag = %q, %v; want it settled before delivery", tag, ok)
 			}
 		})

@@ -142,11 +142,14 @@ func (s *Scope) add(el *tree.Element) {
 }
 
 // Get returns the MOST RECENTLY completed direct child with id, or nil. Later
-// wins, matching ext/tags: within one scope the elements a schema allows to
-// repeat are cumulative and their order carries no meaning, so the later
-// statement is the more recent one. It is the accessor for an element a schema
-// declares at most once -- Info, Tracks -- while a repeating element wants
-// GetAll.
+// wins: within one scope the elements a schema allows to repeat are cumulative
+// and their order carries no meaning, so the later statement is the more recent
+// one. It is the accessor for an element a schema declares at most once -- Info,
+// Tracks -- while a REPEATING element wants GetAll, which keeps them all.
+//
+// Reaching for this where a schema allows repetition silently keeps one element
+// and discards the rest, so an accumulating reader wants GetAll even when a
+// single result is expected.
 //
 // The returned element is nil-safe, so the result is usable unchecked; Exists
 // tests it.

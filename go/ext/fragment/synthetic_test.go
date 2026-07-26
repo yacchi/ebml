@@ -311,7 +311,7 @@ func TestSegmentMetadataHasSettledOnDelivery(t *testing.T) {
 	if len(second) != 1 {
 		t.Fatalf("got %d fragments from the second Feed, want the 1 released by the next Cluster", len(second))
 	}
-	if got, ok := second[0].Tag("ContactId"); !ok || got != "late" {
+	if got, ok := fragTag(second[0], "ContactId"); !ok || got != "late" {
 		t.Fatalf("fragment 1 ContactId = %q, %v; want the tag that had settled by delivery", got, ok)
 	}
 	if got := len(second[0].Blocks); got != 1 || second[0].Blocks[0].Frames[0][0] != 0x01 {
@@ -325,7 +325,7 @@ func TestSegmentMetadataHasSettledOnDelivery(t *testing.T) {
 	if len(tail) != 1 {
 		t.Fatalf("Finalize released %d fragments, want fragment 2", len(tail))
 	}
-	if got, ok := tail[0].Tag("ContactId"); !ok || got != "late" {
+	if got, ok := fragTag(tail[0], "ContactId"); !ok || got != "late" {
 		t.Fatalf("fragment 2 ContactId = %q, %v; the tag is the Segment's, not one fragment's", got, ok)
 	}
 	// Both Fragments share the one Segment node, as documented -- which is why the
@@ -349,14 +349,14 @@ func TestMetadataCompleteReleasesEarly(t *testing.T) {
 	frags := runWhole(t, raw, fragment.WithMetadataComplete(
 		func(pending *fragment.Fragment, completed parser.ElementID) bool {
 			asked = append(asked, completed)
-			_, done := pending.Tag("LAST")
+			_, done := fragTag(pending, "LAST")
 			return done
 		},
 	))
 	if len(frags) != 1 {
 		t.Fatalf("got %d fragments, want 1", len(frags))
 	}
-	if got, ok := frags[0].Tag("LAST"); !ok || got != "yes" {
+	if got, ok := fragTag(frags[0], "LAST"); !ok || got != "yes" {
 		t.Fatalf("released fragment LAST = %q, %v; want the tag it waited for", got, ok)
 	}
 	// The predicate is consulted for the Cluster itself first, then for each direct
@@ -393,7 +393,7 @@ func TestMetadataCompleteAlwaysTrueIsEagerEmission(t *testing.T) {
 	if len(first) != 1 {
 		t.Fatalf("got %d fragments from the first Feed, want 1 at the Cluster's end", len(first))
 	}
-	if got, ok := first[0].Tag("ContactId"); ok {
+	if got, ok := fragTag(first[0], "ContactId"); ok {
 		t.Fatalf("eager fragment carries a tag that had not arrived yet: %q", got)
 	}
 	if _, err := a.Feed(raw[cut:]); err != nil {
@@ -416,7 +416,7 @@ func TestMetadataCompleteNilIsTheDefault(t *testing.T) {
 	if len(frags) != 1 {
 		t.Fatalf("got %d fragments, want 1", len(frags))
 	}
-	if got, ok := frags[0].Tag("trailing"); !ok || got != "yes" {
+	if got, ok := fragTag(frags[0], "trailing"); !ok || got != "yes" {
 		t.Fatalf("trailing tag = %q, %v; want the default wait to have settled it", got, ok)
 	}
 }
@@ -433,10 +433,10 @@ func TestFragmentTagIsLastWins(t *testing.T) {
 	}
 	// RFC 9559 leaves repeated-name precedence undefined; this library chooses
 	// last-wins so later stream statements remain visible.
-	if got, ok := frags[0].Tag("state"); !ok || got != "second" {
+	if got, ok := fragTag(frags[0], "state"); !ok || got != "second" {
 		t.Fatalf("Tag(state) = %q, %v; want second (library last-wins choice)", got, ok)
 	}
-	if got := frags[0].Tags()["state"]; got != "second" {
+	if got := fragTags(frags[0])["state"]; got != "second" {
 		t.Fatalf("Tags()[state] = %q, want second to match Tag", got)
 	}
 }
@@ -462,10 +462,10 @@ func TestFragmentTagNeedsADeclaredValue(t *testing.T) {
 	if len(frags) != 1 {
 		t.Fatalf("got %d fragments, want 1", len(frags))
 	}
-	if got, ok := frags[0].Tag("state"); !ok || got != "real" {
+	if got, ok := fragTag(frags[0], "state"); !ok || got != "real" {
 		t.Fatalf("Tag(state) = %q, %v; want real: an absent TagString is not an empty value", got, ok)
 	}
-	if got, present := frags[0].Tags()["state"]; got != "real" || !present {
+	if got, present := fragTags(frags[0])["state"]; got != "real" || !present {
 		t.Fatalf("Tags()[state] = %q, %v; want real to match Tag", got, present)
 	}
 }
@@ -484,7 +484,7 @@ func TestFragmentTagRequiresATagParent(t *testing.T) {
 	if len(frags) != 1 {
 		t.Fatalf("got %d fragments, want 1", len(frags))
 	}
-	if got, ok := frags[0].Tag("state"); ok {
+	if got, ok := fragTag(frags[0], "state"); ok {
 		t.Fatalf("Tag(state) = %q, %v; want no value for a SimpleTag outside a Tag", got, ok)
 	}
 	// The element is still retained and reachable by loose extraction: it is not
@@ -672,13 +672,13 @@ func TestWithResyncRecoversFromSplicedGarbage(t *testing.T) {
 			if len(frags) != 2 {
 				t.Fatalf("got %d fragments, want 2 (one per Segment)", len(frags))
 			}
-			if got, _ := frags[0].Tag("ContactId"); got != "first" {
+			if got, _ := fragTag(frags[0], "ContactId"); got != "first" {
 				t.Fatalf("fragment 0 ContactId = %q", got)
 			}
 			// The fragment after the garbage is complete and uncontaminated, and its
 			// offsets still refer to the original stream.
 			after := frags[1]
-			if got, _ := after.Tag("ContactId"); got != "second" {
+			if got, _ := fragTag(after, "ContactId"); got != "second" {
 				t.Fatalf("fragment 1 ContactId = %q", got)
 			}
 			if got := after.TimestampScale(); got != 2_000_000 {
@@ -912,10 +912,10 @@ func TestWithSkipContentErrorsDropsOneElement(t *testing.T) {
 			if got := frags[0].TrackPCM(1); !reflect.DeepEqual(got, []byte{0x01, 0x03}) {
 				t.Fatalf("fragment 0 PCM = %x, want 0103", got)
 			}
-			if got, _ := frags[0].Tag("ContactId"); got != "first" {
+			if got, _ := fragTag(frags[0], "ContactId"); got != "first" {
 				t.Fatalf("fragment 0 ContactId = %q", got)
 			}
-			if got, _ := frags[1].Tag("ContactId"); got != "second" {
+			if got, _ := fragTag(frags[1], "ContactId"); got != "second" {
 				t.Fatalf("fragment 1 ContactId = %q", got)
 			}
 			if got := frags[1].TrackPCM(1); !reflect.DeepEqual(got, []byte{0x04}) {

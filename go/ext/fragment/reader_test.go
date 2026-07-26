@@ -85,8 +85,8 @@ func TestReaderMatchesFeed(t *testing.T) {
 				if len(got[i].Blocks) != len(want[i].Blocks) {
 					t.Errorf("fragment %d: %d blocks, want %d", i, len(got[i].Blocks), len(want[i].Blocks))
 				}
-				gotTag, _ := got[i].Tag("AWS_KINESISVIDEO_FRAGMENT_NUMBER")
-				wantTag, _ := want[i].Tag("AWS_KINESISVIDEO_FRAGMENT_NUMBER")
+				gotTag, _ := fragTag(got[i], "AWS_KINESISVIDEO_FRAGMENT_NUMBER")
+				wantTag, _ := fragTag(want[i], "AWS_KINESISVIDEO_FRAGMENT_NUMBER")
 				if gotTag != wantTag {
 					t.Errorf("fragment %d: tag %q, want %q", i, gotTag, wantTag)
 				}

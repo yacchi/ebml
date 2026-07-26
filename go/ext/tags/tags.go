@@ -1,9 +1,9 @@
-// Package tags reads Matroska Tags elements from a retained Segment scope.
+// Package tags reads Matroska Tags elements out of retained tree elements.
 package tags
 
 import (
-	"github.com/yacchi/ebml/ext/scope"
 	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
 	"github.com/yacchi/ebml/tree"
 )
 
@@ -29,26 +29,68 @@ type Set struct {
 	targets []Target
 }
 
-// Read builds a view over the Tags elements the scope observed. It is computed,
-// not accumulated: scope.Scope.Rev is all a caller needs to know when to rebuild.
-func Read(s *scope.Scope) *Set {
-	if s == nil {
-		return ReadElement(nil)
-	}
-	var roots []*tree.Element
-	for _, element := range s.GetAll(matroska.IDTags) {
-		roots = append(roots, element)
-	}
+// Read builds a view over the Tag elements found anywhere under roots.
+//
+// A root is an element that CONTAINS the tags to read, and is searched to any
+// depth. A whole retained Segment is therefore one argument:
+//
+//	set := tags.Read(segment)
+//
+// A root is never a Tag itself: a root is searched, not counted, so passing Tag
+// elements yields an EMPTY view rather than their contents. Pass what encloses
+// them -- the Segment, or the Tags elements. A producer that hands out elements
+// by ID has ReadFrom instead, which spares the caller naming the ID at all.
+//
+// Taking retained elements is the design, not just convenience. Every retention
+// path in this library lands in a *tree.Element, so that is the shared currency
+// and the only thing a tag reader needs to name. This package therefore names no
+// producer of them, and a producer names no tag accessor: an entry point per
+// producer gives the plainer name to the narrower case, and a caller holding one
+// of the other producers then reads the plainer name as the whole story.
+//
+// Roots must not overlap. An element passed together with one of its own
+// ancestors contributes its tags twice; the last-wins precedence Get documents
+// hides that, and Values does not.
+//
+// The view is computed rather than accumulated, so it is rebuilt, not updated,
+// once the tree behind it has grown. A Segment retained from a LIVE stream does
+// grow -- RFC 9559 tags are cumulative and positionless, so a writer may state
+// more of them at any point before the Segment ends -- which is why this returns
+// a value computed on the spot and holds no reference to a producer.
+func Read(roots ...*tree.Element) *Set {
 	return read(roots)
 }
 
-// ReadElement builds the same view from a retained Segment tree. It is the tree
-// entry point used by consumers that retain a segment without a scope.
-func ReadElement(segment *tree.Element) *Set {
-	if segment == nil {
+// Source is a producer that hands over the retained elements carrying a given
+// ID. It is satisfied by a method an element-agnostic retainer already has FOR
+// ITS OWN SAKE, never by one invented for this package -- which is the whole
+// point: nothing implements anything for tags, and tags names nothing that
+// implements it.
+//
+// That distinction is what makes this interface admissible where an obvious
+// alternative is not. A purpose-built method -- TagRoots, say -- would put
+// Matroska tag knowledge into every type that implemented it, so a retainer that
+// must stay element-agnostic could not offer one at all.
+type Source interface {
+	GetAll(id parser.ElementID) []*tree.Element
+}
+
+// ReadFrom builds the same view from a producer that indexes elements by ID:
+//
+//	set := tags.ReadFrom(src)
+//
+// Naming the Tags ID is this package's job, not the caller's, and that is the
+// only reason this function exists. The call it replaces --
+// tags.Read(sc.GetAll(matroska.IDTags)...) -- has two silent failure modes and
+// no loud one: passing IDTag instead of IDTags yields an empty view, because a
+// Tag root is searched rather than counted, and reaching for Get instead of
+// GetAll silently keeps the LAST Tags element only, discarding tags a live
+// stream wrote before its Cluster. Neither mistake can be made here.
+func ReadFrom(src Source) *Set {
+	if src == nil {
 		return read(nil)
 	}
-	return read(segment.ChildrenByID(matroska.IDTags))
+	return read(src.GetAll(matroska.IDTags))
 }
 
 func read(roots []*tree.Element) *Set {
@@ -139,7 +181,7 @@ func (t *Set) All(target Target) map[string]string {
 	return out
 }
 
-// Targets returns every distinct target the scope's tags name, in first-seen
+// Targets returns every distinct target the observed tags name, in first-seen
 // order.
 func (t *Set) Targets() []Target {
 	if t == nil {

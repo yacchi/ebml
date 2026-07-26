@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/yacchi/ebml/ext/fragment"
+	"github.com/yacchi/ebml/ext/tags"
 	"github.com/yacchi/ebml/matroska"
 )
 
@@ -17,6 +18,12 @@ import (
 //
 // It loads the committed topology_basic fixture and feeds it in fixed 64-byte
 // chunks to demonstrate that chunk boundaries do not matter.
+//
+// It is also where this package states how a fragment's tags are read, since it
+// offers no tag accessor of its own and its doc comments name no other package:
+// Segment is an ordinary retained element, so ext/tags reads it. Saying that in
+// runnable, output-checked code rather than in prose is deliberate -- a comment
+// describing a sibling package's API is a dependency nothing recompiles.
 func Example_streamingAssembly() {
 	raw := loadFixtureBytes("topology_basic")
 
@@ -42,7 +49,7 @@ func Example_streamingAssembly() {
 	fragments = append(fragments, tail...)
 
 	for _, f := range fragments {
-		contactID, _ := f.Tag("ContactId")
+		contactID, _ := tags.Read(f.Segment).Get(tags.Target{}, "ContactId")
 		fmt.Printf("ContactId=%s start=%s\n", contactID, f.StartTime())
 		for _, track := range f.Tracks() {
 			number, err := track.Find(matroska.IDTrackNumber).AsUint()

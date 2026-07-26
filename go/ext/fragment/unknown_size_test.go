@@ -163,7 +163,7 @@ func TestPostClusterTagsAreInTheDeliveredFragment(t *testing.T) {
 	if len(frags) != 1 {
 		t.Fatalf("got %d fragments, want 1", len(frags))
 	}
-	tags := frags[0].Tags()
+	tags := fragTags(frags[0])
 	for _, name := range []string{
 		"ContactId",
 		"InstanceId",
@@ -205,7 +205,7 @@ func TestEagerEmissionStillExcludesPostClusterTags(t *testing.T) {
 	if len(frags) != 1 {
 		t.Fatalf("got %d fragments, want 1", len(frags))
 	}
-	tags := frags[0].Tags()
+	tags := fragTags(frags[0])
 	if _, ok := tags["AWS_KINESISVIDEO_FRAGMENT_NUMBER"]; !ok {
 		t.Error("Tags() missing a pre-Cluster key")
 	}
@@ -253,7 +253,7 @@ func TestUnknownSizeClusterSplitInvariance(t *testing.T) {
 			if len(got) != 1 || len(got[0].Blocks) != 2 {
 				t.Fatalf("got %d fragments and %d blocks, want 1 and 2", len(got), len(got[0].Blocks))
 			}
-			if tag, ok := got[0].Tag("next"); !ok || tag != "document" {
+			if tag, ok := fragTag(got[0], "next"); !ok || tag != "document" {
 				t.Fatalf("trailing tag = %q, %v; want it settled before delivery", tag, ok)
 			}
 		})

@@ -139,7 +139,7 @@ func run(t *testing.T, chunks [][]byte, opts ...fragment.Option) runResult {
 
 func mustTag(t *testing.T, f *fragment.Fragment, name string) string {
 	t.Helper()
-	v, ok := f.Tag(name)
+	v, ok := fragTag(f, name)
 	if !ok {
 		t.Fatalf("missing tag %s", name)
 	}
@@ -221,7 +221,7 @@ func project(f *fragment.Fragment) string {
 		fmt.Fprintf(&b, "block %d track=%d timecode=%d time=%s pcm=%s\n",
 			i, blk.TrackNumber, blk.Timecode, f.BlockTime(blk), hex.EncodeToString(pcm))
 	}
-	tags := f.Tags()
+	tags := fragTags(f)
 	names := make([]string, 0, len(tags))
 	for name := range tags {
 		names = append(names, name)
@@ -294,18 +294,18 @@ func TestTopologyBasic(t *testing.T) {
 	if got := mustTag(t, f, "InstanceId"); got == "" {
 		t.Fatalf("InstanceId empty")
 	}
-	fn, ok := f.Tag(tagFragmentNumber)
+	fn, ok := fragTag(f, tagFragmentNumber)
 	if !ok || fn != "91343852333181000000000000000000000000000000001" {
 		t.Fatalf("FragmentNumber = %q ok=%v", fn, ok)
 	}
-	if _, ok := f.Tag(tagContinuationToken); !ok {
+	if _, ok := fragTag(f, tagContinuationToken); !ok {
 		t.Fatalf("ContinuationToken missing")
 	}
 	ts := parseDecimalSeconds(t, mustTag(t, f, tagProducerTimestamp))
 	if ts.Unix() != 1000000000 || ts.Nanosecond() != 0 {
 		t.Fatalf("ProducerTimestamp = %v", ts)
 	}
-	if got, want := len(f.Tags()), 5; got != want {
+	if got, want := len(fragTags(f)), 5; got != want {
 		t.Fatalf("len(Tags()) = %d, want %d", got, want)
 	}
 
@@ -407,7 +407,7 @@ func TestTailLastFragment(t *testing.T) {
 	if len(tail.Blocks) != 2 {
 		t.Fatalf("tail blocks = %d", len(tail.Blocks))
 	}
-	if fn, _ := tail.Tag(tagFragmentNumber); fn != "tail-1" {
+	if fn, _ := fragTag(tail, tagFragmentNumber); fn != "tail-1" {
 		t.Fatalf("tail FragmentNumber = %q", fn)
 	}
 }
@@ -452,14 +452,14 @@ func TestTaglessSingle(t *testing.T) {
 		t.Fatalf("want 3 fragments, got %d", len(frags))
 	}
 	// Middle fragment's Segment omits the entire Tags element.
-	tags := frags[1].Tags()
+	tags := fragTags(frags[1])
 	if tags == nil {
 		t.Fatal("Tags() must never be nil, even for a tagless Segment")
 	}
 	if len(tags) != 0 {
 		t.Fatalf("middle fragment should be tagless, got %v", tags)
 	}
-	if _, ok := frags[1].Tag("ContactId"); ok {
+	if _, ok := fragTag(frags[1], "ContactId"); ok {
 		t.Fatalf("tagless fragment must not have ContactId")
 	}
 	// It still parses structurally: two declared tracks + a block.
@@ -467,7 +467,7 @@ func TestTaglessSingle(t *testing.T) {
 		t.Fatalf("tagless fragment structure: tracks=%d blocks=%d", len(frags[1].Tracks()), len(frags[1].Blocks))
 	}
 	for _, i := range []int{0, 2} {
-		if _, ok := frags[i].Tag("ContactId"); !ok {
+		if _, ok := fragTag(frags[i], "ContactId"); !ok {
 			t.Fatalf("fragment %d should have ContactId", i)
 		}
 	}
@@ -481,7 +481,7 @@ func TestTaglessConsecutive(t *testing.T) {
 	}
 
 	for i, wantTagged := range []bool{true, false, false, true} {
-		_, ok := frags[i].Tag("ContactId")
+		_, ok := fragTag(frags[i], "ContactId")
 		if ok != wantTagged {
 			t.Fatalf("fragment %d ContactId present = %v, want %v", i, ok, wantTagged)
 		}
@@ -494,13 +494,13 @@ func TestPartialTags(t *testing.T) {
 	if len(frags) != 2 {
 		t.Fatalf("want 2 fragments, got %d", len(frags))
 	}
-	if got := len(frags[1].Tags()); got != 3 {
+	if got := len(fragTags(frags[1])); got != 3 {
 		t.Fatalf("partial fragment Tags() length = %d, want 3", got)
 	}
-	if _, ok := frags[1].Tag("ContactId"); ok {
+	if _, ok := fragTag(frags[1], "ContactId"); ok {
 		t.Fatal("partial fragment must omit ContactId in the source Tags")
 	}
-	if _, ok := frags[1].Tag("InstanceId"); ok {
+	if _, ok := fragTag(frags[1], "InstanceId"); ok {
 		t.Fatal("partial fragment must omit InstanceId in the source Tags")
 	}
 	if got := frags[1].Value(matroska.IDSegmentUUID).Bytes(); !reflect.DeepEqual(got, frags[0].Value(matroska.IDSegmentUUID).Bytes()) {
@@ -565,7 +565,7 @@ func TestGap(t *testing.T) {
 	want := []string{"gap-0", "gap-1", "gap-4"}
 	wantTS := []uint64{0, 1024, 4096}
 	for i, f := range frags {
-		if fn, _ := f.Tag(tagFragmentNumber); fn != want[i] {
+		if fn, _ := fragTag(f, tagFragmentNumber); fn != want[i] {
 			t.Fatalf("fragment %d FragmentNumber = %q, want %q", i, fn, want[i])
 		}
 		if got := f.ClusterTimestamp(); got != wantTS[i] {
@@ -616,10 +616,10 @@ func TestMultiCluster(t *testing.T) {
 	if frags[0].Cluster == frags[1].Cluster {
 		t.Fatal("each Cluster must be its own tree")
 	}
-	if !reflect.DeepEqual(frags[0].Tags(), frags[1].Tags()) {
-		t.Fatalf("clusters should share tags: %v vs %v", frags[0].Tags(), frags[1].Tags())
+	if !reflect.DeepEqual(fragTags(frags[0]), fragTags(frags[1])) {
+		t.Fatalf("clusters should share tags: %v vs %v", fragTags(frags[0]), fragTags(frags[1]))
 	}
-	if fn, _ := frags[0].Tag(tagFragmentNumber); fn != "multi-cluster" {
+	if fn, _ := fragTag(frags[0], tagFragmentNumber); fn != "multi-cluster" {
 		t.Fatalf("FragmentNumber = %q", fn)
 	}
 	if frags[0].ClusterTimestamp() != 0 || frags[1].ClusterTimestamp() != 1024 {

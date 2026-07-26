@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yacchi/ebml/ext/fragment"
+	"github.com/yacchi/ebml/ext/tags"
 	"github.com/yacchi/ebml/matroska"
 )
 
@@ -117,36 +118,36 @@ func (r *Reader) Next() (*fragment.Fragment, Metadata, error) {
 }
 
 func (r *Reader) metadata(f *fragment.Fragment) Metadata {
-	tags := f.Tags()
+	pairs := tags.Read(f.Segment).All(tags.Target{})
 	if r.inheritTags {
-		tags = r.effectiveTags(f, tags)
+		pairs = r.effectiveTags(f, pairs)
 	}
-	m := Metadata{Tags: tags}
-	m.FragmentNumber = tags[TagFragmentNumber]
-	m.ContinuationToken = tags[TagContinuationToken]
-	if millis, err := strconv.ParseInt(tags[TagMillisBehindNow], 10, 64); err == nil {
+	m := Metadata{Tags: pairs}
+	m.FragmentNumber = pairs[TagFragmentNumber]
+	m.ContinuationToken = pairs[TagContinuationToken]
+	if millis, err := strconv.ParseInt(pairs[TagMillisBehindNow], 10, 64); err == nil {
 		m.MillisBehindNow = time.Duration(millis) * time.Millisecond
 	}
-	if t, err := ParseTimestamp(tags[TagProducerTimestamp]); err == nil {
+	if t, err := ParseTimestamp(pairs[TagProducerTimestamp]); err == nil {
 		m.ProducerTimestamp = t
 	}
-	if t, err := ParseTimestamp(tags[TagServerTimestamp]); err == nil {
+	if t, err := ParseTimestamp(pairs[TagServerTimestamp]); err == nil {
 		m.ServerTimestamp = t
 	}
 	return m
 }
 
-func (r *Reader) effectiveTags(f *fragment.Fragment, tags map[string]string) map[string]string {
+func (r *Reader) effectiveTags(f *fragment.Fragment, pairs map[string]string) map[string]string {
 	value := f.Value(matroska.IDSegmentUUID)
 	if value == nil {
-		return tags
+		return pairs
 	}
 	uuid := hex.EncodeToString(value.Bytes())
-	effective := make(map[string]string, len(r.history[uuid])+len(tags))
+	effective := make(map[string]string, len(r.history[uuid])+len(pairs))
 	for name, tag := range r.history[uuid] {
 		effective[name] = tag
 	}
-	for name, tag := range tags {
+	for name, tag := range pairs {
 		effective[name] = tag
 	}
 	// The caller owns the map it is handed, so the history keeps one of its own.

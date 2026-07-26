@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/yacchi/ebml/ext/fragment"
+	"github.com/yacchi/ebml/ext/tags"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
 )
@@ -51,7 +52,7 @@ func MetadataComplete(pending *fragment.Fragment, completed parser.ElementID) bo
 	if completed != matroska.IDTags {
 		return false
 	}
-	_, ok := pending.Tag(TagContinuationToken)
+	_, ok := tags.Read(pending.Segment).Get(tags.Target{}, TagContinuationToken)
 	return ok
 }
 

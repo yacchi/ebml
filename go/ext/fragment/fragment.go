@@ -52,7 +52,6 @@ package fragment
 import (
 	"time"
 
-	"github.com/yacchi/ebml/ext/tags"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
 	"github.com/yacchi/ebml/tree"
@@ -180,45 +179,6 @@ func (f *Fragment) Value(id parser.ElementID) *tree.Element {
 		return node
 	}
 	return nil
-}
-
-// Tag returns the last TagString of a Segment-scoped SimpleTag whose TagName is
-// name, and whether such a tag DECLARED a value. RFC 9559 does not define
-// precedence for repeated names; last-wins is this library's choice. See Tags for
-// how the pairs are collected.
-func (f *Fragment) Tag(name string) (string, bool) {
-	if f == nil {
-		return "", false
-	}
-	return tags.ReadElement(f.Segment).Get(tags.Target{}, name)
-}
-
-// Tags flattens the Segment's SimpleTag elements into a TagName -> TagString map.
-// The map is built per call and owned by the caller, never aliasing the
-// assembler's state; it is non-nil and empty for a Segment that carries no Tags.
-//
-// Collection is generic and depth-agnostic WITHIN a Tag element: every SimpleTag
-// inside one counts, wherever it sits, including one nested inside another
-// SimpleTag. A SimpleTag with no Tag ancestor is NOT collected -- Targets, which
-// is what decides an entry's scope, is a child of Tag, so such an element states
-// no target and treating it as Segment-scoped would be this library inventing a
-// meaning RFC 9559 does not give it. It stays retained and reachable through
-// Segment, just not as a tag.
-//
-// A tag with an empty TagName is skipped, and so is one that declares no
-// TagString at all: an absent TagString is not an empty one, and reporting it as
-// the empty string would erase a value stated earlier under last-wins. A
-// TagString that is present and empty IS a value. A repeated TagName keeps its
-// last occurrence, which is what Tag reports too. Tags with non-zero Targets are
-// excluded because these accessors are Segment-scoped. Interpreting a specific tag --
-// naming conventions, value encoding -- is left to the caller, which is how AWS
-// KVS metadata (AWS_KINESISVIDEO_FRAGMENT_NUMBER and friends) is read without
-// this package knowing anything about it.
-func (f *Fragment) Tags() map[string]string {
-	if f == nil {
-		return make(map[string]string)
-	}
-	return tags.ReadElement(f.Segment).All(tags.Target{})
 }
 
 // Tracks returns the Segment's TrackEntry elements in stream order, and nil when
