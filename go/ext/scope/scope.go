@@ -1,14 +1,14 @@
 // Package scope retains the directly completed children of one master element.
 //
 // It is deliberately element-agnostic. A scope contains only nodes the caller
-// observed, and nested access is left to ext/tree.
+// observed, and nested access is left to tree.
 package scope
 
 import (
 	"bytes"
 
-	"github.com/yacchi/ebml/ext/tree"
 	"github.com/yacchi/ebml/parser"
+	"github.com/yacchi/ebml/tree"
 )
 
 // PayloadReader resolves a leaf's payload. *stream.Stream satisfies it; a

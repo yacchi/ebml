@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"github.com/yacchi/ebml/ext/fragment"
-	"github.com/yacchi/ebml/ext/tree"
 	"github.com/yacchi/ebml/internal/ebmltest"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
+	"github.com/yacchi/ebml/tree"
 )
 
 // Well-known AWS KVS tag names used by the fixtures under fixtures/kvs/. These

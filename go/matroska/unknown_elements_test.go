@@ -1,5 +1,5 @@
 // This file is the external test package (matroska_test) because the round-trip
-// test imports ext/tree, which imports matroska: only a package's external test
+// test imports tree, which imports matroska: only a package's external test
 // package may close that loop. The core itself must never import ext.
 package matroska_test
 
@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yacchi/ebml/ext/tree"
 	"github.com/yacchi/ebml/internal/ebmltest"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
+	"github.com/yacchi/ebml/tree"
 )
 
 // Vendor element IDs: valid 2-byte EBML IDs that RFC 9559 does not define, so
@@ -161,7 +161,7 @@ func TestRegisteredVendorMasterNests(t *testing.T) {
 // TestOpaqueMasterRecoveredWithTree is the fourth guarantee, the round trip:
 // an unregistered master read as one opaque leaf loses nothing, because its
 // payload bytes can be re-parsed afterwards with the finite-buffer parser in
-// ext/tree -- with the vendor registry, recovering the full nesting and names.
+// tree -- with the vendor registry, recovering the full nesting and names.
 func TestOpaqueMasterRecoveredWithTree(t *testing.T) {
 	stream, vendorPayload := vendorStream()
 	reg := vendorRegistry(t)

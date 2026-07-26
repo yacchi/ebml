@@ -4,9 +4,10 @@
 //
 // # What lives under ext
 //
-// Packages under ext/ are Go-idiomatic conveniences for common consumption
-// shapes -- a retained element tree, per-Cluster fragment assembly -- built
-// exclusively on the exported API of the core packages, parser and matroska.
+// The packages under ext/ are scope, tags and fragment. They are conveniences
+// for common consumption shapes -- scope tracking, tag views and per-Cluster
+// fragment assembly -- built exclusively on the exported API of the core
+// packages: parser, matroska, writer, tree and stream.
 // They add no parsing of their own: whatever an ext package does, a consumer
 // could have written with the same public core calls. That is the point of the
 // layer. It is a standing proof that the core is sufficient, and it is where
@@ -15,7 +16,8 @@
 // # They are outside the cross-language contract
 //
 // The contract that spec/SPEC.md defines -- the cursor, its event model and its
-// flow control, plus the element registry -- is what other-language ports
+// flow control, the element registry, the retained element model, and the
+// byte-supply contract a source-owning driver honours -- is what other-language ports
 // implement, event for event. Nothing under ext/ is part of it. These packages
 // may change shape, be renamed, or be removed independently of the specified
 // core, and a port in another language is not expected to mirror them: an

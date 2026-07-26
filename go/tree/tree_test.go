@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yacchi/ebml/ext/tree"
 	"github.com/yacchi/ebml/internal/ebmltest"
 	"github.com/yacchi/ebml/internal/kvsgen"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
+	"github.com/yacchi/ebml/tree"
 	"github.com/yacchi/ebml/writer"
 )
 

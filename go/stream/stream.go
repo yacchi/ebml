@@ -1,9 +1,19 @@
-// Package stream provides Go convenience for driving a parser cursor from an
-// io.Reader. It is outside the portable contract in spec/SPEC.md because owning
-// an input source is inherently a Go concern.
+// Package stream drives a parser cursor from a byte source it owns, answering
+// NeedMoreData so that nothing above it ever sees that flow-control error.
 //
-// Stream answers NeedMoreData here, where the source is owned, so consumers
-// above it never see that flow-control error.
+// It is CORE, not convenience. io.Reader is Go's spelling of a byte source, but
+// the contract it stands for is not Go's: keep supplying bytes and parsing
+// proceeds, and when the source is exhausted the input is finalized so a stream
+// that ended inside an element is reported as truncated. Every port needs that
+// contract, and getting its end-of-input half wrong is observable -- a reader
+// that skipped Finalize would silently accept a truncated document. Only the
+// spelling of the source is language-specific; SPEC.md states the contract and
+// leaves each language to name its own source type.
+//
+// The cursor's own Feed/Next split stays exactly as it is: a consumer that wants
+// to push bytes itself drives parser.Cursor directly and answers NeedMoreData
+// itself. This package is the answer for a consumer that would rather hand over
+// the source.
 package stream
 
 import (

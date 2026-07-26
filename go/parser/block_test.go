@@ -116,7 +116,7 @@ func TestParseSimpleBlockRejectsMalformedLacing(t *testing.T) {
 // for the encoder: every SimpleBlock in the committed fixture corpus is decoded and
 // re-encoded, and the result must equal the original payload byte for byte. It is
 // the block-level counterpart of the parse-then-marshal round trip package
-// ext/tree runs over the same fixtures.
+// tree runs over the same fixtures.
 func TestSimpleBlockAppendMatchesCorpusBytes(t *testing.T) {
 	var paths []string
 	root := filepath.Join("..", "..", "fixtures")

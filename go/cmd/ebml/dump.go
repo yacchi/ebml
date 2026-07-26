@@ -7,9 +7,9 @@ import (
 	"io"
 	"strings"
 
-	"github.com/yacchi/ebml/ext/stream"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
+	"github.com/yacchi/ebml/stream"
 )
 
 type dumpOptions struct {

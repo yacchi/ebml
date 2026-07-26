@@ -188,7 +188,7 @@ func UnknownSizeVINT() []byte {
 // 0x01FFFFFFFFFFFFFF that UnknownSizeVINT returns does. The width is therefore
 // never a semantic choice — it only decides how many bytes the header occupies —
 // and it matters for one purpose: reproducing a document's original bytes, which is
-// what ext/tree.Marshal does with the header length it retained. Write the 8-byte
+// what tree.Marshal does with the header length it retained. Write the 8-byte
 // form for anything new.
 //
 // It is valid for master elements only (see UnknownSize) and reports
@@ -321,7 +321,7 @@ func EncodeString(s string) ([]byte, error) {
 // EncodeDate returns the payload of an EBML date: 8 bytes of signed nanoseconds
 // relative to 2001-01-01T00:00:00 UTC, big-endian two's complement, which negative
 // values place before that epoch. It is the inverse of the date decoding in
-// ext/tree (Element.AsTime).
+// tree (Element.AsTime).
 //
 // The result is always 8 bytes, so the epoch itself encodes as eight zero bytes
 // rather than the empty payload EBML also reads as the epoch; use Writer.Leaf with

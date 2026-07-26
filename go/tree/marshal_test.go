@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yacchi/ebml/ext/tree"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
+	"github.com/yacchi/ebml/tree"
 	"github.com/yacchi/ebml/writer"
 )
 
@@ -21,7 +21,7 @@ import (
 // corpus is two levels deep at most: fixtures/tiny.ebml.hex and fixtures/kvs/*.
 func fixturePaths(t *testing.T) []string {
 	t.Helper()
-	root := filepath.Join("..", "..", "..", "fixtures")
+	root := filepath.Join("..", "..", "fixtures")
 	var paths []string
 	for _, pattern := range []string{"*.ebml.hex", filepath.Join("*", "*.ebml.hex")} {
 		matched, err := filepath.Glob(filepath.Join(root, pattern))
@@ -69,7 +69,7 @@ func loadHexFixture(t *testing.T, path string) []byte {
 // one-byte unknown-size marker and any non-minimal size VINT -- would differ here.
 func TestMarshalRoundTripsEveryFixture(t *testing.T) {
 	for _, path := range fixturePaths(t) {
-		name, err := filepath.Rel(filepath.Join("..", "..", ".."), path)
+		name, err := filepath.Rel(filepath.Join("..", ".."), path)
 		if err != nil {
 			name = filepath.Base(path)
 		}

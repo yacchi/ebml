@@ -515,7 +515,7 @@ func TestEncodeDateInverse(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: DecodeInt = %v", c.name, err)
 		}
-		// This is exactly how ext/tree decodes a date.
+		// This is exactly how tree decodes a date.
 		if back := testEpoch.Add(time.Duration(ns)); !back.Equal(c.t) {
 			t.Errorf("%s: date round trip = %v, want %v", c.name, back, c.t)
 		}

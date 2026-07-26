@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	"github.com/yacchi/ebml/ext/scope"
-	"github.com/yacchi/ebml/ext/stream"
 	"github.com/yacchi/ebml/ext/tags"
 	"github.com/yacchi/ebml/internal/ebmltest"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
+	"github.com/yacchi/ebml/stream"
 )
 
 func simpleTag(name, value string, nested ...ebmltest.Node) ebmltest.Node {

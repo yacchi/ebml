@@ -3,8 +3,8 @@ package tags
 
 import (
 	"github.com/yacchi/ebml/ext/scope"
-	"github.com/yacchi/ebml/ext/tree"
 	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/tree"
 )
 
 // Target is a decoded Targets element. Its zero value is the whole Segment,

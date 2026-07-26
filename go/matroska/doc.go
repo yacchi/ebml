@@ -53,7 +53,7 @@
 //     and its name appears wherever the registry is consulted.
 //   - Nothing is lost by not knowing. A master that was not registered arrives
 //     as one binary leaf, and its bytes are complete: re-parsing that payload --
-//     for instance with the finite-buffer parser in ext/tree, optionally with a
+//     for instance with the finite-buffer parser in tree, optionally with a
 //     registry that does know the element -- recovers the full internal
 //     structure afterwards. Discovering an unknown master therefore never
 //     requires re-reading the stream.

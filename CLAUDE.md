@@ -8,12 +8,27 @@ carries no meaning.
 
 ## Architecture and standing design rules
 
-* The CORE is `go/parser` plus `go/matroska`: the cursor, event model, flow
-  control, VINT behavior, and element registry. It is the only cross-language
-  contract and is specified in `spec/SPEC.md`.
+* The CORE is `go/parser`, `go/matroska`, `go/writer`, `go/tree` and
+  `go/stream`: membership is decided by whether a PORT MUST AGREE ON IT TO
+  INTEROPERATE, not by how generic the code looks. The cursor, event model, flow
+  control, VINT behavior, element registry, retained element model, encoder, and
+  the byte-supply contract are that agreement and are specified in
+  `spec/SPEC.md`. Ways of USING them belong in `ext`, where another language may
+  reasonably choose a different shape or none at all.
+  `go/stream` is core for the reason its own doc gives: `io.Reader` is Go's
+  SPELLING of a byte source, but the contract it stands for is not Go's -- keep
+  supplying bytes and parsing proceeds, and an exhausted source is finalized so a
+  document that ended mid-element is reported as truncated. A port that skipped
+  that last half would silently accept a truncated document, which is exactly the
+  kind of disagreement the contract exists to prevent.
 * Everything under `go/ext/` is optional Go convenience built solely on exported
   core API. If an extension needs an unavailable capability, fix the core; do
-  not reach into internals or add a workaround in the extension.
+  not reach into internals or add a workaround in the extension. An extension
+  may reasonably have a different shape, or no equivalent, in another language.
+* `tree` is the core retained document model defined by EBML's tree-shaped
+  document; this does not change the parser sanctuary. `parser` is a StAX-shaped
+  reader and never imports retained document state or `tree`. The import
+  direction is enforced by `go/internal/archtest`.
 * `ext/scope` is element-agnostic and follows one master by depth regression,
   never by pairing EndNodes, because `MasterNode.Skip` emits no EndNode. It
   retains only directly completed children and has no configuration or lexical
@@ -52,10 +67,10 @@ carries no meaning.
 * Iterator sugar (`Cursor.Nodes`) may exist but is NOT the normative shape: a range
   loop cannot distinguish need-more-data from end of input, and that distinction is
   this library's central semantic. Keep it explicit in `Next`.
-* The answer to `NeedMoreData` lives in exactly one place, `ext/stream`, because
+* The answer to `NeedMoreData` lives in exactly one place, `go/stream`, because
   only the holder of the input source can give it. A consumer that pushes bytes
   itself still sees `NeedMoreData` from `parser.Cursor`; that low-level contract
-  stays unchanged.
+  stays unchanged, and the two are not alternatives -- `stream` is built on it.
 * `parser.Parser` stays exported as the low-level engine: `internal/ebmltrace` needs
   operation-level control to produce the golden traces, and the goldens are the
   conformance corpus.
@@ -87,7 +102,7 @@ carries no meaning.
   `LeaveMaster` remains the ordinary close at a declared end.
 * `go/writer` is the repository's ONLY EBML encoder. No test, fixture generator or
   extension may carry an encoder of its own: `internal/kvsgen` builds the corpus
-  through it, `ext/tree.Marshal` composes its primitives, and hand-shaped test
+  through it, `tree.Marshal` composes its primitives, and hand-shaped test
   inputs call it too — through `internal/ebmltest`, the ONE shared shaping layer
   over the public writer API (`Leaf`/`Uint`/`String`/`UTF8`/`Master`/
   `UnknownMaster`/`Encode`). A test may not re-implement it per file, and an
@@ -101,10 +116,12 @@ carries no meaning.
   bytes uses `go/writer`.
 * (i) The writer holds no element knowledge either; the caller picks the value
   type.
-* (j) Parse-then-marshal stays byte-identical for every committed fixture.
-* The two access modes exist only in `ext`: loose extraction ignores containment
-  and returns every matching node; strict access uses exact paths and ancestry.
-  Loose nodes retain their structure so the modes compose.
+* (j) Parse-then-marshal is a core contract and stays byte-identical for every
+  committed fixture: retained `HeaderLen` reproduces each header's original
+  size-VINT width.
+* `tree` provides two access modes: loose extraction (`Descendants`) ignores
+  containment, while strict access (`Find` and ancestry) uses exact paths.
+  Loose results retain their structure so the modes compose.
 * No retention path uses a per-element allowlist. Unknown elements remain
   readable, and an unknown master-shaped payload can be re-parsed later.
 * Errors have exactly two classes plus flow control, and the classification is
@@ -204,7 +221,7 @@ The core is working and tested:
   names 270 of the schema's 273 elements, checked element by element by
   `internal/specconform`; the three exceptions are the deprecated Cluster
   children and are documented where the containment lists are.
-* `go/ext/tree` retains a generic tree and implements loose `Descendants` and
+* `go/tree` retains a generic tree and implements loose `Descendants` and
   strict `Find`/ancestry navigation. `Marshal`/`MarshalBytes` write a tree back
   out; parse then marshal is BYTE-IDENTICAL for every committed fixture unless a
   payload was elided by a retention cap, because the retained `HeaderLen` still
@@ -212,11 +229,11 @@ The core is working and tested:
   `Fragment` per completed `Cluster` by pulling `Cursor.Next` in its own loop,
   using only exported core APIs, with `WithResync` and `WithSkipContentErrors`
   as its two opt-in, per-error-class recovery options.
-* `go/ext/stream` owns an `io.Reader` and answers `NeedMoreData` while driving a
- cursor. The CLI's private stream driver is gone; `go/kvs.Reader` remains a
- byte-oriented assembler driver because it consumes `Assembler.Feed`, not cursor
- nodes.
-* `go/ext/scope` tracks any master and the elements that completed directly
+* `go/stream` owns an `io.Reader` and answers `NeedMoreData` while driving a
+  cursor. The CLI's private stream driver is gone; `go/kvs.Reader` remains a
+  byte-oriented assembler driver because it consumes `Assembler.Feed`, not cursor
+  nodes.
+* `go/ext/scope` (ext: a way of USING the core, not part of the agreement) tracks any master and the elements that completed directly
   inside it. It is element-agnostic and unwinds by node-depth regression, never
   by pairing EndNodes, because `MasterNode.Skip` emits no EndNode. Only observed
   nodes exist in a scope, with no configured retain policy or element allowlist;
@@ -233,7 +250,7 @@ The core is working and tested:
   runnable example moved to `go/kvs/examples/getmedia`.
 * The module is `github.com/yacchi/ebml`, and the CLI is `ebml` under
   `go/cmd/ebml`. The public `go/writer` package replaced the four private
-  encoders formerly in `internal/kvsgen`, `ext/tree/tree_test.go`,
+  encoders formerly in `internal/kvsgen`, `tree/tree_test.go`,
   `ext/fragment/synthetic_test.go`, and `matroska/unknown_elements_test.go`.
   The fixture corpus is generated through the public writer, and round-trip
   conformance checks retained trees byte-for-byte.

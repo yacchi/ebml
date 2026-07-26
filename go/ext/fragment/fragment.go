@@ -3,7 +3,7 @@
 //
 // It is an optional convenience: see package ext for the policy that applies to
 // every package under ext/. In short, this package is built only on the exported
-// API of parser (it pulls events from a parser.Cursor), matroska and ext/tree; it
+// API of parser (it pulls events from a parser.Cursor), matroska and tree; it
 // is deliberately outside the cross-language contract that spec/SPEC.md defines,
 // and other-language ports are not expected to provide an equivalent.
 //
@@ -30,7 +30,7 @@
 // an ID anywhere in the fragment, at any depth, ignoring containment. The Segment
 // and Cluster trees are the strict, structural view, where Find states an exact
 // path. They compose, because a loose lookup returns nodes -- Path, Parent and
-// Ancestor tighten a loose result afterwards. See package ext/tree for the two
+// Ancestor tighten a loose result afterwards. See package tree for the two
 // modes in full.
 //
 // On top of both sit the accessors that add something the trees cannot state on
@@ -45,9 +45,9 @@ import (
 	"time"
 
 	"github.com/yacchi/ebml/ext/tags"
-	"github.com/yacchi/ebml/ext/tree"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
+	"github.com/yacchi/ebml/tree"
 )
 
 // DefaultTimestampScale is the Matroska default TimestampScale in nanoseconds,
@@ -140,7 +140,7 @@ func (f *Fragment) Values(id parser.ElementID) []*tree.Element {
 // nil when there is none. The scope and the looseness are those documented on
 // Values.
 //
-// A nil result is safe to use: every ext/tree accessor is nil-safe, so
+// A nil result is safe to use: every tree accessor is nil-safe, so
 // f.Value(id).Bytes() and f.Value(id).AsUint() never panic on a miss.
 func (f *Fragment) Value(id parser.ElementID) *tree.Element {
 	for _, node := range f.Values(id) {

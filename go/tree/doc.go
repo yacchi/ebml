@@ -1,13 +1,10 @@
 // Package tree retains a parsed EBML document as a navigable element tree.
 //
-// It is an optional convenience: see package ext for the policy that applies to
-// every package under ext/. In short, this package is built only on the exported
-// API of parser and matroska, it is deliberately outside the cross-language
-// contract that spec/SPEC.md defines, and other-language ports are not expected
-// to provide an equivalent. The core is a streaming cursor that emits events and
-// forgets them; retention is a consumer policy, and this package is one such
-// policy -- retain everything from a finite buffer -- expressed once so callers
-// do not each write it again.
+// It is part of the core cross-language contract: RFC 8794 defines an EBML
+// document as a tree of elements. The package is built only on the exported API
+// of parser, matroska and writer. The core parser remains a streaming cursor
+// that emits events and forgets them; tree is the separate retained data model,
+// so parser never imports it.
 //
 // # Parse and Element
 //
@@ -59,9 +56,8 @@
 //	    }
 //	}
 //
-// Loose and strict therefore compose rather than compete. Neither notion exists
-// in the core: the cursor only emits events, and both modes are consequences of
-// retention, which is why they live here and not there.
+// Loose and strict therefore compose rather than compete. The cursor only emits
+// events, while tree provides the format's retained document model.
 //
 // # Element knowledge
 //

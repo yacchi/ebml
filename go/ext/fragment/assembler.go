@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/yacchi/ebml/ext/tree"
 	"github.com/yacchi/ebml/matroska"
 	"github.com/yacchi/ebml/parser"
+	"github.com/yacchi/ebml/tree"
 )
 
 // DefaultMaxRetainedPayload caps how many bytes a single retained leaf payload
