@@ -1,5 +1,11 @@
 # ebml
 
+[![CI](https://github.com/yacchi/ebml/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/yacchi/ebml/actions/workflows/ci.yml)
+[![Conformance](https://github.com/yacchi/ebml/actions/workflows/conformance.yml/badge.svg?branch=main)](https://github.com/yacchi/ebml/actions/workflows/conformance.yml)
+[![codecov](https://codecov.io/gh/yacchi/ebml/branch/main/graph/badge.svg)](https://codecov.io/gh/yacchi/ebml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/yacchi/ebml/main)](https://github.com/yacchi/ebml/commits/main)
+
 **Read and write Matroska, WebM and any other EBML document as a stream — while
 the bytes are still arriving.**
 

@@ -1,5 +1,13 @@
 # `impl/go/` — the Go implementation
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/yacchi/ebml/impl/go.svg)](https://pkg.go.dev/github.com/yacchi/ebml/impl/go)
+[![Go Report Card](https://goreportcard.com/badge/github.com/yacchi/ebml/impl/go)](https://goreportcard.com/report/github.com/yacchi/ebml/impl/go)
+[![Go 1.25](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/dl/)
+[![codecov](https://codecov.io/gh/yacchi/ebml/branch/main/graph/badge.svg?flag=core)](https://codecov.io/gh/yacchi/ebml?flags%5B0%5D=core)
+
+The Go-specific badges live here rather than at the repository root, which stays
+language-neutral.
+
 The Go module `github.com/yacchi/ebml/impl/go`, plus one module per integration —
 currently `github.com/yacchi/ebml/impl/go/integrations/kvs` under `integrations/kvs/`.
 This is the Go documentation: the map of

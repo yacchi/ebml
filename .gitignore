@@ -17,6 +17,7 @@
 # Go
 /bin/
 dist/
+coverage.out
 
 # Fetched-on-demand spec documents. The IETF CELLAR EBML Schemas are CC-BY-4.0
 # works and are never committed here; the conformance-check skill downloads

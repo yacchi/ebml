@@ -154,6 +154,15 @@ go -C impl/go run ./internal/specconform/checkschema \
   -schema ../../.spec-cache/ebml.xml -schema ../../.spec-cache/ebml_matroska.xml -missing
 ```
 
+CI runs those same commands, under `-race`, once per module. Two gates are not
+reproducible by reading the code alone and are worth knowing about before a
+change lands: `.github/workflows/ci.yml` regenerates the corpus and FAILS ON ANY
+DIFF, because a corpus that cannot be reproduced from the public writer is a
+corpus nothing keeps honest; `.github/workflows/conformance.yml` runs
+`internal/specconform` against PINNED schema commits, so upstream moving can
+never turn the build red on its own, and reports drift against their `master`
+weekly without failing.
+
 Fixtures under `fixtures/**/*.ebml.hex` are commented hexadecimal and entirely
 synthetic; the corpus is 15 fixtures and models an unknown-size `Cluster`
 throughout, each one described in `fixtures/kvs/README.json`. Golden files under `golden/**/*.jsonl` contain one JSON object per

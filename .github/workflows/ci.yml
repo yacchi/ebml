@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: core
+            dir: impl/go
+            flag: core
+          - name: integrations/kvs
+            dir: impl/go/integrations/kvs
+            flag: kvs
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.dir }}/go.mod
+          # Both modules have zero third-party requires, so there is no go.sum
+          # for setup-go to key a module cache on. The build cache below is what
+          # is actually worth keeping.
+          cache: false
+
+      - name: Restore build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ matrix.flag }}-${{ hashFiles(format('{0}/**/*.go', matrix.dir)) }}
+          restore-keys: |
+            go-build-${{ runner.os }}-${{ matrix.flag }}-
+
+      - name: Vet
+        run: go vet ./...
+        working-directory: ${{ matrix.dir }}
+
+      - name: Test
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+        working-directory: ${{ matrix.dir }}
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ matrix.dir }}/coverage.out
+          flags: ${{ matrix.flag }}
+          fail_ci_if_error: true
+
+  format:
+    name: gofmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: impl/go/go.mod
+          cache: false
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l impl/go)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt reports these files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+  fixtures:
+    name: corpus is reproducible
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: impl/go/go.mod
+          cache: false
+
+      # The committed corpus is generated, and it is generated through the
+      # public writer. Regenerating it must produce the bytes already in the
+      # tree: a corpus that cannot be reproduced from the library is a corpus
+      # nothing keeps honest.
+      - name: Regenerate fixtures and goldens
+        run: go run ./internal/kvsgen/genfixtures
+        working-directory: impl/go
+
+      - name: Assert the tree is unchanged
+        run: git diff --exit-code -- fixtures golden

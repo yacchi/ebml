@@ -1,0 +1,92 @@
+name: Conformance
+
+# The registry in impl/go/matroska is hand-written, and internal/specconform
+# checks it against the official IETF CELLAR EBML Schemas. Those schemas are
+# CC-BY-4.0 works and are never vendored here, so this workflow fetches them.
+#
+# The gating run uses PINNED commits, so a change upstream can never turn this
+# red on its own. The weekly run additionally looks at the schemas' current
+# master and reports any drift in the job summary without failing the build:
+# upstream moving is news, not a defect in this repository.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EBML_SPEC_REF: a4b3c4a
+  MATROSKA_SPEC_REF: f93ab02
+
+jobs:
+  registry:
+    name: registry matches the schemas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: impl/go/go.mod
+          cache: false
+
+      - name: Fetch the pinned schemas
+        run: |
+          mkdir -p .spec-cache
+          curl -sSL --fail -o .spec-cache/ebml.xml \
+            "https://raw.githubusercontent.com/ietf-wg-cellar/ebml-specification/${EBML_SPEC_REF}/ebml.xml"
+          curl -sSL --fail -o .spec-cache/ebml_matroska.xml \
+            "https://raw.githubusercontent.com/ietf-wg-cellar/matroska-specification/${MATROSKA_SPEC_REF}/ebml_matroska.xml"
+
+      - name: Check the registry
+        run: |
+          go -C impl/go run ./internal/specconform/checkschema \
+            -schema ../../.spec-cache/ebml.xml \
+            -schema ../../.spec-cache/ebml_matroska.xml \
+            -missing | tee "$GITHUB_STEP_SUMMARY"
+
+  upstream-drift:
+    name: upstream schema drift
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: impl/go/go.mod
+          cache: false
+
+      - name: Fetch the current schemas
+        run: |
+          mkdir -p .spec-cache
+          curl -sSL --fail -o .spec-cache/ebml.xml \
+            https://raw.githubusercontent.com/ietf-wg-cellar/ebml-specification/master/ebml.xml
+          curl -sSL --fail -o .spec-cache/ebml_matroska.xml \
+            https://raw.githubusercontent.com/ietf-wg-cellar/matroska-specification/master/ebml_matroska.xml
+
+      # Reported, never gating. A mismatch here means the schemas moved and the
+      # registry has some catching up to do, which is a task, not a broken build.
+      - name: Check the registry against master
+        continue-on-error: true
+        run: |
+          {
+            echo "## Registry vs. the schemas at \`master\`"
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          go -C impl/go run ./internal/specconform/checkschema \
+            -schema ../../.spec-cache/ebml.xml \
+            -schema ../../.spec-cache/ebml_matroska.xml \
+            -missing 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
