@@ -134,18 +134,16 @@ type Scope struct {
 	start  int64
 	end    int64
 	rev    uint64
-	ids    []parser.ElementID
-	all    map[parser.ElementID][]*tree.Element
+	// children holds every directly completed child in stream order. One ordered
+	// slice is the whole index: Get, GetAll and IDs are all derived from it by a
+	// linear scan. A scope holds a master's direct children -- a handful of
+	// elements -- so a map would buy nothing and would be a second piece of state
+	// to keep in step with this one.
+	children []*tree.Element
 }
 
 func (s *Scope) add(el *tree.Element) {
-	if s.all == nil {
-		s.all = make(map[parser.ElementID][]*tree.Element)
-	}
-	if _, ok := s.all[el.ID]; !ok {
-		s.ids = append(s.ids, el.ID)
-	}
-	s.all[el.ID] = append(s.all[el.ID], el)
+	s.children = append(s.children, el)
 }
 
 // Get returns the MOST RECENTLY completed direct child with id, or nil. Later
@@ -161,21 +159,29 @@ func (s *Scope) Get(id parser.ElementID) *tree.Element {
 	if s == nil {
 		return nil
 	}
-	group := s.all[id]
-	if len(group) == 0 {
-		return nil
+	for i := len(s.children) - 1; i >= 0; i-- {
+		if s.children[i].ID == id {
+			return s.children[i]
+		}
 	}
-	return group[len(group)-1]
+	return nil
 }
 
-// GetAll returns directly completed children with id in stream order. It never
-// searches descendants; use tree.Element.Descendants on a returned child for
-// that operation.
+// GetAll returns directly completed children with id in stream order, as a slice
+// the caller owns: the scope never hands out the state it is still accumulating
+// into. It never searches descendants; use tree.Element.Descendants on a returned
+// child for that.
 func (s *Scope) GetAll(id parser.ElementID) []*tree.Element {
 	if s == nil {
 		return nil
 	}
-	return s.all[id]
+	var out []*tree.Element
+	for _, el := range s.children {
+		if el.ID == id {
+			out = append(out, el)
+		}
+	}
+	return out
 }
 
 // IDs returns the IDs of directly completed children in first-seen order.
@@ -183,7 +189,16 @@ func (s *Scope) IDs() []parser.ElementID {
 	if s == nil {
 		return nil
 	}
-	return append([]parser.ElementID(nil), s.ids...)
+	var out []parser.ElementID
+	seen := make(map[parser.ElementID]struct{}, len(s.children))
+	for _, el := range s.children {
+		if _, ok := seen[el.ID]; ok {
+			continue
+		}
+		seen[el.ID] = struct{}{}
+		out = append(out, el.ID)
+	}
+	return out
 }
 
 // Rev returns the revision of the scope.

@@ -362,3 +362,28 @@ func TestGetReturnsTheMostRecentChild(t *testing.T) {
 		t.Errorf("Get = %q, want %q: Get is the most recent, not the first", got, "second")
 	}
 }
+
+// TestGetAllReturnsACallerOwnedSlice pins that a scope never hands out the state
+// it is still accumulating into: a caller that rewrites the returned slice must
+// not be able to change what the scope reports next.
+func TestGetAllReturnsACallerOwnedSlice(t *testing.T) {
+	raw := ebmltest.Encode(ebmltest.Master(matroska.IDSegment,
+		ebmltest.Master(matroska.IDTags, ebmltest.UTF8(matroska.IDTagString, "first")),
+		ebmltest.Master(matroska.IDTags, ebmltest.UTF8(matroska.IDTagString, "second")),
+	))
+	s := scopeFor(raw, matroska.IDSegment)
+
+	got := s.GetAll(matroska.IDTags)
+	if len(got) != 2 {
+		t.Fatalf("Tags count = %d, want 2", len(got))
+	}
+	got[0] = nil
+
+	again := s.GetAll(matroska.IDTags)
+	if len(again) != 2 || again[0] == nil {
+		t.Fatal("mutating a returned slice changed what the scope reports")
+	}
+	if v := again[0].Find(matroska.IDTagString).AsString(); v != "first" {
+		t.Fatalf("first Tags = %q, want %q", v, "first")
+	}
+}
