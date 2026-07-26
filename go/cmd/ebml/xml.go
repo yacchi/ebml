@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/xml"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -176,12 +175,8 @@ func runXML(in io.Reader, out io.Writer, opt xmlOptions) error {
 
 // walk pulls every element of s and emits it.
 func (x *xmlEmitter) walk(s *stream.Stream) error {
-	for {
-		node, err := s.Next()
+	for node, err := range s.Nodes() {
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
 			return fmt.Errorf("at offset %d: %w", s.Offset(), err)
 		}
 		switch n := node.(type) {
@@ -198,6 +193,7 @@ func (x *xmlEmitter) walk(s *stream.Stream) error {
 			return x.err
 		}
 	}
+	return nil
 }
 
 func xmlCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int {

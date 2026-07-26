@@ -3,7 +3,6 @@ package scope_test
 import (
 	"bytes"
 	"errors"
-	"io"
 	"testing"
 
 	"github.com/yacchi/ebml/ext/scope"
@@ -78,11 +77,10 @@ func TestUnobservedNodeIsNotInScope(t *testing.T) {
 	))
 	s := stream.New(bytes.NewReader(raw), matroska.KindForElementID)
 	tkr := scope.NewTracker(matroska.IDSegment, s)
-	n, _ := s.Next()
+	n := pull(t, s)
 	tkr.Observe(n)
 	n.(*parser.MasterNode).Descend()
-	n, _ = s.Next()
-	n.(*parser.MasterNode).Skip()
+	pull(t, s).(*parser.MasterNode).Skip()
 	if got := tkr.Finish().Get(matroska.IDInfo); got.Exists() {
 		t.Fatal("node was retained despite not being observed")
 	}
@@ -99,11 +97,7 @@ func TestScopeClosesAtNextMasterOfTheSameID(t *testing.T) {
 	var second *scope.Scope
 	var secondIDs []parser.ElementID
 	var closedCount int
-	for {
-		n, err := s.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
+	for n, err := range s.Nodes() {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -137,10 +131,7 @@ func TestFinishClosesAnOpenScope(t *testing.T) {
 	raw := ebmltest.Encode(ebmltest.UnknownMaster(matroska.IDSegment))
 	s := stream.New(bytes.NewReader(raw), matroska.KindForElementID)
 	tkr := scope.NewTracker(matroska.IDSegment, s)
-	n, err := s.Next()
-	if err != nil {
-		t.Fatal(err)
-	}
+	n := pull(t, s)
 	if _, err := tkr.Observe(n); err != nil {
 		t.Fatal(err)
 	}
@@ -162,11 +153,7 @@ func TestObserveIsAtomicOnError(t *testing.T) {
 	s := stream.New(bytes.NewReader(raw), matroska.KindForElementID)
 	tkr := scope.NewTracker(matroska.IDSegment, src)
 	var done *scope.Scope
-	for {
-		n, err := s.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
+	for n, err := range s.Nodes() {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -206,11 +193,7 @@ func TestRetainedBytesAreCopied(t *testing.T) {
 	s := stream.New(bytes.NewReader(raw), matroska.KindForElementID)
 	tkr := scope.NewTracker(matroska.IDSegment, src)
 	var done *scope.Scope
-	for {
-		n, err := s.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
+	for n, err := range s.Nodes() {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -265,14 +248,7 @@ func run(raw []byte, id parser.ElementID, decide func(parser.Node)) *scope.Scope
 	s := stream.New(bytes.NewReader(raw), matroska.KindForElementID)
 	tkr := scope.NewTracker(id, s)
 	var last *scope.Scope
-	for {
-		n, err := s.Next()
-		if errors.Is(err, io.EOF) {
-			if current := tkr.Finish(); current != nil {
-				last = current
-			}
-			return last
-		}
+	for n, err := range s.Nodes() {
 		if err != nil {
 			panic(err)
 		}
@@ -283,6 +259,24 @@ func run(raw []byte, id parser.ElementID, decide func(parser.Node)) *scope.Scope
 		}
 		decide(n)
 	}
+	if current := tkr.Finish(); current != nil {
+		last = current
+	}
+	return last
+}
+
+// pull takes exactly one node and leaves the stream standing on it. Breaking out
+// of a range over Nodes is how a consumer takes a single node; there is no Next.
+func pull(t *testing.T, s *stream.Stream) parser.Node {
+	t.Helper()
+	for n, err := range s.Nodes() {
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	t.Fatal("stream yielded no node")
+	return nil
 }
 
 type failingPayload struct {

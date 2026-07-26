@@ -33,6 +33,36 @@ carries no meaning.
   core API. If an extension needs an unavailable capability, fix the core; do
   not reach into internals or add a workaround in the extension. An extension
   may reasonably have a different shape, or no equivalent, in another language.
+* Standard-library sensibility governs SPELLING, not MEMBERSHIP, and it
+  constrains the CONTRACT, never the MECHANISM. Membership in the core is still
+  decided by whether a PORT MUST AGREE ON IT TO INTEROPERATE. Once something IS
+  core, its API must be one the host language's standard library could plausibly
+  carry: nothing outside the language's own standard library (both modules have
+  zero third-party requires and that stays true), no configuration object, no
+  hook registry, no DSL, and errors, naming and lifetimes spelled the way the
+  host language spells them.
+  What a port must reproduce is the OBSERVABLE CONTRACT; how it reproduces it is
+  the port's own business, and a mechanism this repository uses is never itself
+  the requirement. Go stamps a generation into every node and panics on a stale
+  one because Go has no borrow checker; a Rust port spells the SAME lifetime
+  guarantee as `&'_ mut self` and needs neither stamp nor panic, and that is full
+  compliance, not a divergence. `io.Reader` is likewise Go's spelling of a byte
+  source, not the contract.
+  The one shape that is NOT free is the ARITY OF A PULL. A pull has three
+  outcomes — an event, need-more-data, and end of input — and a two-outcome
+  iterator protocol (value/done) can carry them only by collapsing one. The test
+  for a port is not "does it avoid iterators" but "can this protocol state all
+  three without lying", and the answer follows from WHO OWNS THE BYTE SUPPLY:
+  where the caller pushes bytes (`parser.Cursor`) need-more-data has nowhere to
+  go, so the operation stays an explicit call — Rust's `futures::Stream` PASSES
+  the test, since `Poll::Pending` IS need-more-data, while a plain `Iterator`
+  does not; where the layer owns the source (`go/stream`) blocking or `await`
+  absorbs need-more-data, so an iterator is correct there. A port that offers
+  only the iterator over a caller-pushed cursor has dropped this library's
+  central distinction, whatever else it gets right.
+  `docs/pull-shape-across-languages.md` works both cases through several
+  languages and is the reference for a port; keep it and `spec/SPEC.md`'s
+  "Portability of API shape" section in agreement.
 * `tree` is the core retained document model defined by EBML's tree-shaped
   document; this does not change the parser sanctuary. `parser` is a StAX-shaped
   reader and never imports retained document state or `tree`. The import
@@ -79,6 +109,16 @@ carries no meaning.
   only the holder of the input source can give it. A consumer that pushes bytes
   itself still sees `NeedMoreData` from `parser.Cursor`; that low-level contract
   stays unchanged, and the two are not alternatives -- `stream` is built on it.
+  Because `stream` has absorbed need-more-data, only two outcomes remain there,
+  and it is the ONE layer where the iterator is exact rather than lossy: its whole
+  reading surface is `Nodes() iter.Seq2[parser.Node, error]`, with `Payload` and
+  `Offset` beside it and NO exported `Next`. That absence is the point — two
+  spellings of the same pull is how the three-outcome collapse creeps back in, and
+  `stream` is the working proof of the arity rule above, not merely its
+  description. The end of the input ends the iteration; every other failure is
+  yielded once, as the final pair, with a nil node, so a consumer cannot lose it
+  by forgetting a separate `Err` call the way `Cursor.Nodes` allows. Never add a
+  `Stream.Next` back, and never soften `Nodes` to an `iter.Seq` plus `Err`.
 * `parser.Parser` stays exported as the low-level engine: `internal/ebmltrace` needs
   operation-level control to produce the golden traces, and the goldens are the
   conformance corpus.
@@ -268,7 +308,9 @@ The core is working and tested:
   using only exported core APIs, with `WithResync` and `WithSkipContentErrors`
   as its two opt-in, per-error-class recovery options.
 * `go/stream` owns an `io.Reader` and answers `NeedMoreData` while driving a
-  cursor. The CLI's private stream driver is gone; `go/kvs.Reader` remains a
+  cursor. Its whole reading surface is `Nodes() iter.Seq2[parser.Node, error]`;
+  there is no exported `Next`, and `stream` is the working proof of the arity rule
+  above. The CLI's private stream driver is gone; `go/kvs.Reader` remains a
   byte-oriented assembler driver because it consumes `Assembler.Feed`, not cursor
   nodes.
 * `go/ext/scope` (ext: a way of USING the core, not part of the agreement) tracks any master and the elements that completed directly
@@ -373,4 +415,7 @@ Fixtures under `fixtures/**/*.ebml.hex` are commented hexadecimal and entirely
 synthetic. Golden files under `golden/**/*.jsonl` contain one JSON object per
 cursor operation. Split definitions are in `tests/split_patterns.json`.
 `spec/SPEC.md` is the normative portable contract; `README.md` documents the
-core first and then the optional Go extensions.
+core first and then the optional Go extensions. `docs/` holds the design notes
+that are too long for a package doc and are NOT normative — a note that
+contradicts `spec/SPEC.md` is the thing that is wrong. Each note is listed in
+`docs/README.md`; a new one goes there in the same change.

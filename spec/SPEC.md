@@ -32,6 +32,41 @@ the structural-termination rule. Element naming and value typing live in a
 separate registry rather than in the parser. Finally, split invariance is
 normative here because an implementation does not own the read loop.
 
+## Portability of API shape
+
+This document specifies an OBSERVABLE CONTRACT. How a port reproduces it is the
+port's own business, and no mechanism used by the reference implementation is
+itself a requirement. A port is expected to spell the contract the way its own
+standard library would: nothing outside that standard library, no configuration
+object, no hook registry, no query language, and errors, naming and lifetimes
+named the way the host language names them. Go stamps a generation into every
+node and panics on a stale one because Go has no borrow checker; a port whose
+language expresses the same lifetime in its type system reproduces section 3's
+guarantee with no stamp and no panic, and that is full conformance, not a
+divergence. `io.Reader` is likewise Go's spelling of a byte source, not the
+contract.
+
+One shape is NOT free, because it is the contract rather than its spelling: the
+ARITY OF A PULL. Acquiring an event has three outcomes -- an event,
+need-more-data, and end of input -- and a two-outcome iterator protocol
+(value/done) can carry them only by collapsing one of them. The test for a port
+is therefore not "does it avoid iterators" but "can this protocol state all three
+outcomes without lying", and the answer follows from WHO OWNS THE BYTE SUPPLY:
+
+* The caller supplies the bytes (section 2's cursor). Need-more-data has nowhere
+  to go, so acquiring an event stays an explicit operation. An iterator-family
+  protocol that does carry a third, not-yet state -- Rust's `Stream::poll_next`,
+  where `Poll::Pending` IS need-more-data -- passes the test and is a correct
+  spelling; a plain two-outcome iterator is not.
+* The driver owns the source (section 5). Blocking or awaiting absorbs
+  need-more-data before the consumer can observe it, only two outcomes remain,
+  and an iterator, generator or async iterator is then the correct spelling.
+
+A port that offers only an iterator over a caller-supplied cursor has dropped
+this specification's central distinction, whatever else it gets right.
+`docs/pull-shape-across-languages.md` works the two cases through several
+languages.
+
 ## Writing
 
 A conforming writer emits an element ID VINT, a size VINT, and the payload in
@@ -366,6 +401,21 @@ the complete node and payload validity rule.
 This contract does not replace the cursor's push-bytes/pull-events split. A
 consumer that owns its own read loop drives the cursor directly and answers
 need-more-data itself.
+
+Because the driver has absorbed need-more-data, only two outcomes remain here --
+a node, or the end of the input -- and this is the one layer where the host
+language's iterator is an exact spelling rather than a lossy one. See
+"Portability of API shape". A driver that offers an iterator SHOULD NOT also
+offer a second, explicit acquire operation: the two spell the same pull, and the
+redundant one is where the three-outcome collapse reappears.
+
+> **Go mapping (non-normative):** `stream.Stream`, whose whole reading surface is
+> `Nodes() iter.Seq2[parser.Node, error]` plus `Payload` and `Offset`. There is
+> deliberately no exported `Next`. The end of the input ends the iteration instead
+> of yielding a value; every other failure is yielded once, as the final pair, with
+> a nil node, so a consumer cannot miss it by forgetting a separate `Err` call.
+> Breaking out of the range leaves the stream standing on the node it broke on, and
+> ranging again resumes after it.
 
 ## 6. Flow control
 

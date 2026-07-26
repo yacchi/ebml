@@ -14,12 +14,26 @@
 // to push bytes itself drives parser.Cursor directly and answers NeedMoreData
 // itself. This package is the answer for a consumer that would rather hand over
 // the source.
+//
+// # Why this layer is an iterator and the cursor is not
+//
+// A pull has THREE outcomes -- an event, need-more-data, and end of input -- and
+// an iterator protocol carries two, value and done. parser.Cursor is fed by its
+// caller, so need-more-data has nowhere to go there and Cursor.Next stays an
+// explicit call. This package OWNS the source, so it answers need-more-data by
+// reading and only two outcomes ever reach the consumer. That is exactly the
+// condition under which the host language's iterator is a CORRECT spelling of
+// the contract rather than a lossy one, so Nodes is the whole reading surface
+// here: there is deliberately no exported Next, because a second spelling of the
+// same pull is where the three-outcome collapse creeps back in.
+// docs/pull-shape-across-languages.md states the same split for other languages.
 package stream
 
 import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 
 	"github.com/yacchi/ebml/parser"
 )
@@ -44,9 +58,49 @@ func New(r io.Reader, classifier parser.KindClassifier, opts ...parser.Option) *
 	}
 }
 
-// Next reports the next node. It never reports NeedMoreData: it reads until the
-// cursor is satisfied, and reports io.EOF once the whole input has been reported.
-func (s *Stream) Next() (parser.Node, error) {
+// Nodes iterates the stream's nodes, reading from the source whenever the cursor
+// needs input. It never yields NeedMoreData: the end of the input ends the
+// iteration instead of producing a value, and any other failure is yielded once,
+// as the final pair, with a nil node.
+//
+//	for node, err := range s.Nodes() {
+//	    if err != nil {
+//	        return err
+//	    }
+//	    ...
+//	}
+//
+// Flow control is unchanged: the decision on a node (MasterNode.Descend/Skip,
+// LeafNode.Payload/Skip, or this Stream's Payload) is taken in the loop body,
+// before the range asks for the following node, and a node is valid only for the
+// iteration that delivered it.
+//
+// Breaking out of the loop leaves the stream exactly where it stopped, so ranging
+// again resumes with the following node: the loop that broke has seen the node it
+// broke on, and the decision left on that node is carried out when iteration
+// resumes. Ranging a stream whose input has already ended yields nothing.
+func (s *Stream) Nodes() iter.Seq2[parser.Node, error] {
+	return func(yield func(parser.Node, error) bool) {
+		for {
+			node, err := s.next()
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+			if !yield(node, nil) {
+				return
+			}
+		}
+	}
+}
+
+// next reports the next node, or io.EOF once the whole input has been reported.
+// It never reports NeedMoreData: it reads until the cursor is satisfied. It is
+// unexported so that Nodes stays the only reading surface -- see the package doc.
+func (s *Stream) next() (parser.Node, error) {
 	for {
 		node, err := s.c.Next()
 		if err == nil {
@@ -65,7 +119,7 @@ func (s *Stream) Next() (parser.Node, error) {
 // outstanding. The node remains valid across those reads, allowing the decision
 // taken on its header to stand until its bytes are available.
 //
-// The bytes are the cursor's own view: valid only until the next Next, never to
+// The bytes are the cursor's own view: valid only until the next node, never to
 // be modified, and copied by whoever retains them.
 func (s *Stream) Payload(leaf *parser.LeafNode) ([]byte, error) {
 	for {

@@ -2,8 +2,6 @@ package tags_test
 
 import (
 	"bytes"
-	"errors"
-	"io"
 	"reflect"
 	"testing"
 
@@ -58,14 +56,8 @@ func readScope(t *testing.T, raw []byte) *scope.Scope {
 	src := stream.New(bytes.NewReader(raw), matroska.KindForElementID,
 		parser.WithBoundary(matroska.StreamBoundary))
 	tracker := scope.NewTracker(matroska.IDSegment, src)
-	for {
-		node, err := src.Next()
-		if errors.Is(err, io.EOF) {
-			if done := tracker.Finish(); done != nil {
-				return done
-			}
-			t.Fatal("stream ended without a Segment scope")
-		}
+	var closed *scope.Scope
+	for node, err := range src.Nodes() {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -74,12 +66,21 @@ func readScope(t *testing.T, raw []byte) *scope.Scope {
 			t.Fatal(err)
 		}
 		if done != nil {
-			return done
+			closed = done
+			break
 		}
 		if master, ok := node.(*parser.MasterNode); ok {
 			master.Descend()
 		}
 	}
+	if closed != nil {
+		return closed
+	}
+	if done := tracker.Finish(); done != nil {
+		return done
+	}
+	t.Fatal("stream ended without a Segment scope")
+	return nil
 }
 
 func segment(children ...ebmltest.Node) []byte {

@@ -12,6 +12,12 @@ cursor, event model, flow control, retained model, byte-supply, and registry
 contracts there. The reading surface does not require retention or buffer bulk
 payloads. `ts/` and `py/` are placeholders, not additional implementations.
 
+What a port must reproduce is that observable contract, spelled the way its own
+standard library would spell it — Go's generation stamp and `io.Reader` are
+mechanisms, not requirements. [`docs/`](docs/) collects the design notes behind
+that, starting with
+[the shape of a pull across languages](docs/pull-shape-across-languages.md).
+
 ## Core first
 
 The cursor is a **token pull loop**: input is pushed in chunks with `Feed`, and
@@ -163,18 +169,25 @@ into the enclosing master.
 ### `stream`
 
 `stream.Stream` owns an `io.Reader` and answers `NeedMoreData`, so consumers
-above it see only nodes, `io.EOF`, or a real failure. It preserves the
-header-first property: skipping a master or leaf does not materialise its
-payload.
+above it see only nodes or a real failure. It preserves the header-first
+property: skipping a master or leaf does not materialise its payload.
+
+`Nodes` is the whole reading surface -- there is deliberately no `Next`. A pull
+has three outcomes (an event, need-more-data, end of input) and an iterator
+carries two, which is why `parser.Cursor`, whose caller supplies the bytes, keeps
+an explicit `Next`. This layer owns the source and answers need-more-data by
+reading, so only two outcomes ever reach the consumer and the iterator is an
+exact, not a lossy, spelling of the contract --
+[docs/pull-shape-across-languages.md](docs/pull-shape-across-languages.md) states
+the same split for other languages. The end of the input ends the loop; any other
+failure arrives once, as the final pair, with a nil node.
 
 ```go
 package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"io"
 
 	"github.com/yacchi/ebml/stream"
 	"github.com/yacchi/ebml/matroska"
@@ -183,11 +196,7 @@ import (
 
 func main() {
 	s := stream.New(bytes.NewReader(nil), matroska.KindForElementID)
-	for {
-		node, err := s.Next()
-		if errors.Is(err, io.EOF) {
-			return
-		}
+	for node, err := range s.Nodes() {
 		if err != nil {
 			panic(err)
 		}
@@ -396,37 +405,31 @@ a returned child when deeper access is wanted.
 package main
 
 import (
-"bytes"
-"errors"
-"io"
+	"bytes"
 
-"github.com/yacchi/ebml/ext/scope"
-"github.com/yacchi/ebml/stream"
-"github.com/yacchi/ebml/matroska"
-"github.com/yacchi/ebml/parser"
+	"github.com/yacchi/ebml/ext/scope"
+	"github.com/yacchi/ebml/stream"
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/parser"
 )
 
 func main() {
-s := stream.New(bytes.NewReader(nil), matroska.KindForElementID)
-t := scope.NewTracker(matroska.IDSegment, s)
-for {
-	n, err := s.Next()
-	if errors.Is(err, io.EOF) {
-		_ = t.Finish()
-		return
-	}
-	if err != nil {
-		panic(err)
-	}
-	_, _ = t.Observe(n)
-	if m, ok := n.(*parser.MasterNode); ok {
-		if m.ID() == matroska.IDCluster {
-			m.Skip()
-		} else {
-			m.Descend()
+	s := stream.New(bytes.NewReader(nil), matroska.KindForElementID)
+	t := scope.NewTracker(matroska.IDSegment, s)
+	for n, err := range s.Nodes() {
+		if err != nil {
+			panic(err)
+		}
+		_, _ = t.Observe(n)
+		if m, ok := n.(*parser.MasterNode); ok {
+			if m.ID() == matroska.IDCluster {
+				m.Skip()
+			} else {
+				m.Descend()
+			}
 		}
 	}
-}
+	_ = t.Finish()
 }
 ```
 
@@ -444,9 +447,7 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"io"
 
 	"github.com/yacchi/ebml/ext/scope"
 	"github.com/yacchi/ebml/stream"
@@ -458,14 +459,7 @@ import (
 func main() {
 	src := stream.New(bytes.NewReader(nil), matroska.KindForElementID)
 	tracker := scope.NewTracker(matroska.IDSegment, src)
-	for {
-		node, err := src.Next()
-		if errors.Is(err, io.EOF) {
-			set := tags.Read(tracker.Finish())
-			value, _ := set.Get(tags.Target{}, "ContactId")
-			fmt.Println(value)
-			return
-		}
+	for node, err := range src.Nodes() {
 		if err != nil {
 			panic(err)
 		}
@@ -476,6 +470,9 @@ func main() {
 			master.Descend()
 		}
 	}
+	set := tags.Read(tracker.Finish())
+	value, _ := set.Get(tags.Target{}, "ContactId")
+	fmt.Println(value)
 }
 ```
 

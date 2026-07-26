@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -100,12 +99,8 @@ func runDump(in io.Reader, out io.Writer, opt dumpOptions) error {
 	}
 	s := stream.New(src, matroska.KindForElementID, parser.WithBoundary(matroska.StreamBoundary))
 	d := dumper{out: out, maxBinary: opt.maxBinary}
-	for {
-		node, err := s.Next()
+	for node, err := range s.Nodes() {
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
 			return fmt.Errorf("at offset %d: %w", s.Offset(), err)
 		}
 		switch n := node.(type) {
@@ -120,6 +115,7 @@ func runDump(in io.Reader, out io.Writer, opt dumpOptions) error {
 			// A master's extent is settled; the dump states structure by depth.
 		}
 	}
+	return nil
 }
 
 func dumpCommand(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
