@@ -8,13 +8,21 @@ carries no meaning.
 
 ## Architecture and standing design rules
 
-* The CORE is `go/parser`, `go/matroska`, `go/writer`, `go/tree` and
-  `go/stream`: membership is decided by whether a PORT MUST AGREE ON IT TO
+* The CORE is `go/parser`, `go/matroska`, `go/writer`, `go/tree`, `go/stream`
+  and `go/crc`: membership is decided by whether a PORT MUST AGREE ON IT TO
   INTEROPERATE, not by how generic the code looks. The cursor, event model, flow
   control, VINT behavior, element registry, retained element model, encoder, and
   the byte-supply contract are that agreement and are specified in
   `spec/SPEC.md`. Ways of USING them belong in `ext`, where another language may
   reasonably choose a different shape or none at all.
+  `go/crc` is core because WHICH BYTES a CRC-32 covers and which way round the
+  four are stored are agreements, not implementation details: a port that covers
+  the parent's header, or that includes the CRC-32 element in its own coverage,
+  or that stores the value big-endian, still writes a self-consistent file, and
+  that file reads as damaged here — a mismatch on bytes nothing ever damaged. It
+  imports nothing from this module because `internal/archtest` confines
+  `go/writer` to `go/parser`, so the one primitive both the writer and `tree`
+  need has to sit BELOW both; anywhere else forces a second copy.
   `go/stream` is core for the reason its own doc gives: `io.Reader` is Go's
   SPELLING of a byte source, but the contract it stands for is not Go's -- keep
   supplying bytes and parsing proceeds, and an exhausted source is finalized so a
@@ -134,6 +142,21 @@ carries no meaning.
 * (j) Parse-then-marshal is a core contract and stays byte-identical for every
   committed fixture: retained `HeaderLen` reproduces each header's original
   size-VINT width.
+* CRC-32 is EXPLICIT on both sides and implicit on neither. Verification happens
+  only when a caller asks for it, `tree.Element.VerifyChecksum`, and nothing in
+  the library ever checks a checksum on its own: a user must never be handed a
+  failure from validation they did not request, and a checksum covers the element
+  data AS STORED, so only the retained model holds the bytes to sum at all — the
+  cursor's payload view dies at the next pull. A mismatch is a CONTENT error
+  (`parser.NewContentError`) and never structural, because the extents were read
+  correctly: the position of the next element is known and the parse is not in
+  doubt, only this element's bytes are. Emission is opt-in PER MASTER
+  (`writer.WithChecksum`) and the CALLER supplies the CRC-32 element ID, exactly
+  as it supplies every other ID — that parameter is what keeps rule (i) intact,
+  since a hard-coded ID would be the first element literal in `go/writer`. And
+  `tree.Marshal` never GENERATES a CRC element: a CRC-bearing input already
+  retains it as an ordinary child and writes it back verbatim, so generating one
+  would rewrite bytes the document already had and break (j).
 * `tree` provides two access modes: loose extraction (`Descendants`) ignores
   containment, while strict access (`Find` and ancestry) uses exact paths.
   Loose results retain their structure so the modes compose.
@@ -294,8 +317,16 @@ Writing and round-trip conformance are complete. The pull cursor, its lazy flow
 control, iterator caveat, and Go extensions are documented; remaining work is
 focused on broader reading conformance and Matroska coverage:
 
-1. Add CRC-32 validation; CRC-32 and Void are currently opaque skippable leaves.
-   Note it cannot live in `go/parser`, which holds no element knowledge.
+1. CRC-32 is DONE on both sides and is not a parser feature: the primitive is
+   `go/crc`, emission is `writer.WithChecksum(crcID)` on a `Buffered` master,
+   and verification is `tree.Element.VerifyChecksum` on one element, with
+   recursion left to the caller's `Walk`. What remains out of scope is not a
+   gap: verification is available exactly where the covered bytes were RETAINED,
+   so a consumer that skipped a subtree, or capped payloads with
+   `WithMaxPayload`, has nothing to sum and is told so
+   (`ChecksumUnavailableError`) rather than passed. Nothing verifies implicitly,
+   and `go/parser` still holds no element knowledge, so a streaming checksum
+   cannot live there. `Void` remains an opaque skippable leaf.
 2. Element coverage is DONE and is now a checked property, not a claim: the
    registry names 270 of the 273 elements the official schemas declare, with
    ZERO mismatches against `matroska-specification@f93ab02` /

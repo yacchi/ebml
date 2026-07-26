@@ -50,6 +50,10 @@ var (
 	// ErrNotPatchable reports the Reserved strategy on a sink that cannot be
 	// patched.
 	ErrNotPatchable = errors.New("sink cannot be patched")
+	// ErrChecksumStrategy reports WithChecksum on a master whose size strategy
+	// does not hold its children in memory. A CRC-32 element precedes the data it
+	// covers, so that data must still be in hand when the value is computed.
+	ErrChecksumStrategy = errors.New("checksum needs the Buffered size strategy")
 	// ErrClosed reports use of a Writer after Close.
 	ErrClosed = errors.New("writer is closed")
 )
@@ -204,3 +208,25 @@ func (e *NotPatchableError) Error() string {
 }
 
 func (e *NotPatchableError) Unwrap() error { return ErrNotPatchable }
+
+// ChecksumStrategyError reports WithChecksum combined with a size strategy that
+// cannot produce one. RFC 8794 requires the CRC-32 element to be the FIRST ordered
+// child of the master it covers, so the value has to be known before any sibling
+// is emitted — while the value is computed FROM those siblings. Only Buffered
+// resolves that: it holds the whole subtree until EndMaster, where the checksum is
+// taken over the buffer and the element prepended to it.
+//
+// Reserved and UnknownSize both stream their children straight to the sink, so by
+// the time the last one is written the earlier bytes are gone and the place the
+// CRC-32 element would have to occupy has already been filled. Strategy is the
+// offending strategy, so the diagnosis names what was asked for; the fix is either
+// Buffered or no checksum on this master.
+type ChecksumStrategyError struct {
+	Strategy SizeStrategy
+}
+
+func (e *ChecksumStrategyError) Error() string {
+	return fmt.Sprintf("size strategy %s cannot carry a CRC-32 element: it must be the master's first child, so the children it covers have to still be in memory when it is computed — only Buffered holds them", e.Strategy)
+}
+
+func (e *ChecksumStrategyError) Unwrap() error { return ErrChecksumStrategy }

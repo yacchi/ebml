@@ -17,15 +17,29 @@ const modulePath = "github.com/yacchi/ebml"
 // StAX-shaped reader, so it must never reach the retained document state in
 // tree. The graph is computed from the packages go list sees, not maintained
 // by hand; the table makes an intentional graph change visible in a diff.
+//
+// It also pins crc as a LEAF, which is why that package exists at all. The
+// CRC-32 checksum primitive is needed on both sides -- writer emits a checksum,
+// tree verifies one -- and this test confines writer to parser, so writer may
+// not reach it through matroska. A primitive placed above writer would therefore
+// have to be copied into writer, and the two copies would drift the way the
+// stream boundary rule's three copies drifted before they were merged: each on
+// its own schedule, each still self-consistent. Sitting below both packages is
+// the only position from which one implementation can serve both, so crc must
+// keep importing nothing from this module.
 func TestCoreDependencyGraph(t *testing.T) {
 	expected := map[string][]string{
 		modulePath + "/parser":   nil,
-		modulePath + "/writer":   {modulePath + "/parser"},
+		modulePath + "/crc":      nil,
+		modulePath + "/writer":   {modulePath + "/crc", modulePath + "/parser"},
 		modulePath + "/matroska": {modulePath + "/parser"},
 		modulePath + "/tree": {
 			modulePath + "/parser",
 			modulePath + "/matroska",
 			modulePath + "/writer",
+			// VerifyChecksum sums the covered bytes with the one checksum
+			// primitive; crc is a leaf package and pulls nothing else in.
+			modulePath + "/crc",
 		},
 		modulePath + "/stream": {modulePath + "/parser"},
 	}

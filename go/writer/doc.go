@@ -69,11 +69,22 @@
 // sink's own Flush method when it has one, e.g. a *bufio.Writer. [Writer.Close]
 // flushes and marks the Writer finished; it never closes the sink.
 //
+// # Checksums
+//
+// A master can be asked to carry an EBML CRC-32 element over its own Element
+// Data, with [WithChecksum] at [Writer.StartMaster]. It is opt-in per master and
+// never implicit, and the caller supplies the CRC-32 element's ID like any other
+// ID, since this package names no element. It requires [Buffered], because RFC
+// 8794 puts the CRC-32 element FIRST while its value comes from the children after
+// it — only a buffered subtree is still in hand at that point. The checksum itself
+// lives in package crc, which the reading side uses too, so the two never drift.
+//
 // # Errors
 //
 // No method panics on caller misuse: an unbalanced EndMaster, an unknown size on a
 // leaf, a size that does not fit its reserved width, a sink that cannot be
-// patched, a string value carrying a NUL byte, and an ill-formed element ID are all
+// patched, a string value carrying a NUL byte, a checksum asked of a strategy that
+// does not buffer its children, and an ill-formed element ID are all
 // reported as typed errors (see
 // errors.go). Validation errors are reported before anything is written, so the
 // caller may correct the call and retry. A failure that cannot be undone because

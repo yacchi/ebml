@@ -29,6 +29,16 @@
 // corpus is therefore a conformance test of retention itself -- anything the model
 // dropped or normalised would show up as a differing byte.
 //
+// # CRC-32 verification
+//
+// VerifyChecksum checks one element's stored CRC-32 against the bytes it covers.
+// It lives here and nowhere else because a checksum covers the element data AS
+// STORED, so only the retained model has those bytes; and it is EXPLICIT, never
+// implicit, so a caller decides what a checksum costs and what a failure means.
+// Byte-exact marshalling is what makes it exact -- the covered bytes are the
+// element's other children written back out -- which is the round-trip guarantee
+// above being used as evidence rather than as a convenience.
+//
 // # Two orthogonal access modes
 //
 // The tree offers two deliberately distinguishable ways to reach a value, and

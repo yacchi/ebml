@@ -506,7 +506,59 @@ returned directly, but it is not the classification test.
 unwraps to the consumer's own error so `errors.Is`/`errors.As` reach its sentinels
 and types unchanged.
 
-## 9. Conformance
+## 9. Element checksums
+
+EBML defines a CRC-32 element that carries a checksum of its parent master's
+data. Reading a document does not require computing it, and an implementation
+that never verifies a checksum is conformant: the element is a well-formed
+binary leaf like any other, and a port may treat it as one. What this section
+fixes is what the value MEANS, because that is where ports disagree silently.
+
+1. **Coverage.** The checksum covers all the Element Data of the CRC-32
+   element's PARENT master, AS STORED, minus the CRC-32 element itself — its
+   header and its payload both. The parent's own header is not covered. The
+   sibling elements' headers are covered, because they are part of the parent's
+   data. A nested master's CRC-32 element is covered by its grandparent's
+   checksum for the same reason.
+2. **Algorithm.** The value is IEEE CRC-32, as in ISO 3309 and ITU-T V.42
+   section 8.1.1.6.2, with an initial value of `0xFFFFFFFF`. It is computed on a
+   little-endian bytestream.
+3. **Storage.** The payload is exactly 4 bytes and holds the value in
+   little-endian order. A CRC-32 element whose payload is any other length is a
+   malformed element, and an implementation must not read a value out of it: a
+   defect in the document must not be reported as a checksum disagreement about
+   the parent's data, because the two have different causes and different
+   remedies.
+4. **Placement.** When present, the CRC-32 element is the FIRST ordered child of
+   its parent master. A writer that emits one must emit it first; the value
+   cannot be computed until the covered bytes exist, so a writer must have those
+   bytes in hand before it emits the master's data.
+5. **Classification.** A mismatch is a CONTENT failure in the sense of section 8,
+   never a structural one. The extents were read correctly — the mismatch is
+   discovered by summing bytes whose boundaries the cursor already established —
+   so the position of the next element is known, the cursor is not failed, and a
+   mismatch must never authorize byte scanning. Nothing about the parse is in
+   doubt; only this element's bytes are.
+
+Requirements 1 through 3 are the whole of the cross-language agreement, and each
+half of a disagreement about them is invisible from inside. A port that covers
+the parent's header, that includes the CRC-32 element in its own coverage, or
+that stores the four bytes the other way round produces files that are entirely
+self-consistent and that every other port reads as damaged — a mismatch on bytes
+nothing ever damaged. A mismatch is also the one failure a reader cannot
+investigate further, so what is summed must be unambiguous before any of it is
+computed.
+
+An implementation that offers verification must have the covered bytes, which
+means retention: the covered definition is "as stored", and a cursor that hands
+out a payload view valid only until the next event has nothing to sum. An
+implementation that discarded a covered payload — by skipping a subtree, or under
+a retention cap — must report that it cannot reach a verdict rather than
+reporting either a pass or a mismatch. Silently passing an element that was never
+checked is the worst of the three answers available, because the entire value of
+a checksum is that a pass means something.
+
+## 10. Conformance
 
 The repository is the conformance corpus.
 

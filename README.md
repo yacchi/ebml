@@ -261,6 +261,85 @@ header is rebuilt at its original size-VINT width — which the retained
 marker survives. A round trip over the corpus is therefore a conformance test of
 retention itself.
 
+`Marshal` never GENERATES a CRC-32 element. A document that carried one retained
+it as an ordinary child and it goes back out verbatim, which is what keeps the
+round trip byte-identical; writing a checksum the input did not have would
+rewrite the document.
+
+### CRC-32 verification
+
+Verification is EXPLICIT and never happens on its own — nothing in this library
+checks a checksum unless you ask. It lives on `tree` rather than on the cursor
+because a checksum covers the element data AS STORED, and only the retained model
+holds those bytes: the cursor's payload view dies at the next `Next`.
+
+`(*tree.Element).VerifyChecksum` checks THIS element and nothing deeper. It
+returns nil when the checksum is correct and nil when there is nothing to check —
+a leaf, or a master with no CRC-32 child, since most masters carry none.
+Recursion is yours, because only you know whether to stop at the first bad
+element or collect every one; `Walk` expresses both.
+
+A mismatch is a **content** error, not a structural one, and that is the part
+worth getting right: the extents were read correctly, so the position of the next
+element is known, the parse is not in doubt, and nothing here justifies scanning
+bytes for a resume point. Every verdict about the document — `*crc.MismatchError`,
+`*crc.LengthError` for a payload that is not four bytes,
+`*tree.MultipleChecksumsError`, and `*tree.ChecksumPositionError` for a correct
+checksum that is not the first child — comes back wrapped in
+`parser.NewContentError`, so `parser.IsStructural` is false for it while
+`errors.As` still reaches the concrete type.
+
+One answer is neither pass nor mismatch: `*tree.ChecksumUnavailableError` says the
+covered bytes are not all in hand, because a payload cap (`WithMaxPayload`)
+elided one. That is not a gap — a consumer that skipped or capped a subtree has
+nothing to sum, and reporting a pass for an element nothing was checked about
+would be worse than reporting anything else.
+
+```go
+package main
+
+import (
+	"errors"
+	"fmt"
+
+	"github.com/yacchi/ebml/crc"
+	"github.com/yacchi/ebml/parser"
+	"github.com/yacchi/ebml/tree"
+)
+
+func verify(data []byte) error {
+	roots, err := tree.Parse(data)
+	if err != nil {
+		return err
+	}
+	for _, root := range roots {
+		var bad error
+		root.Walk(func(el *tree.Element) bool {
+			bad = el.VerifyChecksum()
+			return bad == nil
+		})
+		if bad == nil {
+			continue
+		}
+		var mismatch *crc.MismatchError
+		if errors.As(bad, &mismatch) {
+			// Content, not structural: the parse is intact and only these
+			// bytes are in doubt, so keep going.
+			fmt.Println(mismatch, "structural:", parser.IsStructural(bad))
+			continue
+		}
+		return bad
+	}
+	return nil
+}
+
+func main() {
+	if err := verify(nil); err != nil {
+		fmt.Println(err)
+	}
+}
+```
+
 ## Ways of using the core
 
 Packages are in the core when ports must agree on them to interoperate; this
@@ -518,6 +597,67 @@ canonical encoding that parses back to an equal value.
 With a non-seekable sink such as an `io.Pipe`, the goroutine draining the read
 end must already be running before the first sink write, which is the first
 `StartMaster` and not `New`.
+
+### CRC-32 emission
+
+`writer.WithChecksum(crcID)` makes one master emit an EBML CRC-32 element as its
+first child, covering that master's other element data as stored — sibling
+headers included, the CRC-32 element's own header and payload excluded. It is
+opt-in per master and inherits nothing: a nested master states its own option,
+and its CRC-32 element is then part of what the outer checksum covers.
+
+The element ID is a parameter, not a constant, for the same reason every other ID
+is: the writer holds no element table. `matroska.IDCRC32` is where that ID is
+written down.
+
+`WithChecksum` is valid only with `Buffered`, because the value has to precede
+the bytes it covers, so those bytes must still be in memory. `StartMaster`
+reports `*writer.ChecksumStrategyError` for any other strategy and
+`*writer.InvalidIDError` for an ill-formed `crcID`, both before writing a byte.
+
+```go
+package main
+
+import (
+	"bytes"
+	"fmt"
+
+	"github.com/yacchi/ebml/matroska"
+	"github.com/yacchi/ebml/writer"
+)
+
+func writeCluster() ([]byte, error) {
+	var buf bytes.Buffer
+	w := writer.New(&buf)
+	err := w.StartMaster(
+		matroska.IDCluster,
+		writer.Buffered(),
+		writer.WithChecksum(matroska.IDCRC32),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := w.Uint(matroska.IDTimestamp, 0); err != nil {
+		return nil, err
+	}
+	if err := w.EndMaster(); err != nil {
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func main() {
+	b, err := writeCluster()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Printf("% X\n", b)
+}
+```
 
 The writer has no element knowledge: use registry IDs such as
 `matroska.IDEBML` at the call site when writing a known vocabulary. For a

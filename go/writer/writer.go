@@ -38,6 +38,9 @@ type frame struct {
 	buf  *bytes.Buffer // buffered: this master's subtree
 	prev *bytes.Buffer // buffered: the target to restore on EndMaster (nil = the sink)
 
+	checksum bool             // buffered: emit a CRC-32 element over buf at EndMaster
+	crcID    parser.ElementID // buffered: the CRC-32 element ID the caller supplied
+
 	target    *bytes.Buffer // reserved: where the placeholder was written (nil = the sink)
 	width     int           // reserved: placeholder width in bytes
 	sizeAt    int64         // reserved: position of the placeholder's first byte in target
@@ -111,16 +114,27 @@ func (w *Writer) Depth() int { return len(w.open) }
 // and payload are emitted together at EndMaster. Reserved and UnknownSize write the
 // header immediately, so the children stream straight through.
 //
-// It reports *InvalidIDError for an ill-formed ID, *SizeWidthError for a Reserved
-// width outside 1 to 8 bytes, and *NotPatchableError for Reserved on a sink that
-// cannot be patched with no enclosing Buffered master — in each case before writing
-// a byte, leaving the Writer unchanged.
-func (w *Writer) StartMaster(id parser.ElementID, size SizeStrategy) error {
+// A MasterOption configures this master alone; see WithChecksum, which makes it
+// emit a CRC-32 element as its first child. Options are resolved and validated
+// before the strategy switch runs, because Reserved writes its header
+// immediately: an option rejected afterwards would already have left bytes behind.
+//
+// It reports *InvalidIDError for an ill-formed ID — the master's, or the one an
+// option names — *SizeWidthError for a Reserved width outside 1 to 8 bytes,
+// *NotPatchableError for Reserved on a sink that cannot be patched with no
+// enclosing Buffered master, and *ChecksumStrategyError for WithChecksum on
+// anything but Buffered — in each case before writing a byte, leaving the Writer
+// unchanged.
+func (w *Writer) StartMaster(id parser.ElementID, size SizeStrategy, opts ...MasterOption) error {
 	if err := w.usable(); err != nil {
 		return err
 	}
 	if !ValidID(id) {
 		return &InvalidIDError{ID: id}
+	}
+	mo, err := applyMasterOptions(size, opts)
+	if err != nil {
+		return err
 	}
 
 	switch size.kind {
@@ -159,7 +173,14 @@ func (w *Writer) StartMaster(id parser.ElementID, size SizeStrategy) error {
 
 	default: // strategyBuffered, including the zero SizeStrategy
 		buf := new(bytes.Buffer)
-		w.open = append(w.open, frame{id: id, kind: strategyBuffered, buf: buf, prev: w.cur})
+		w.open = append(w.open, frame{
+			id:       id,
+			kind:     strategyBuffered,
+			buf:      buf,
+			prev:     w.cur,
+			checksum: mo.checksum,
+			crcID:    mo.crcID,
+		})
 		w.cur = buf
 		return nil
 	}
@@ -171,6 +192,10 @@ func (w *Writer) StartMaster(id parser.ElementID, size SizeStrategy) error {
 // buffered subtree are written out now, a Reserved master's size placeholder is
 // patched with the payload length just measured, and an UnknownSize master needs
 // nothing, since its end is not in the bytes at all (see UnknownSize).
+//
+// A Buffered master opened WithChecksum computes its CRC-32 here, over the
+// buffered subtree, and emits the CRC-32 element ahead of it; the declared size
+// covers that element too.
 //
 // It reports *NoOpenMasterError when no master is open, leaving the Writer usable.
 // A Reserved master whose payload outgrew its reserved width is reported as
@@ -211,6 +236,13 @@ func (w *Writer) EndMaster() error {
 	default: // strategyBuffered
 		w.cur = f.prev
 		payload := f.buf.Bytes()
+		if f.checksum {
+			// Summed before the element is prepended, which is the coverage rule
+			// itself: the CRC-32 element's own bytes are not part of what it covers.
+			// The declared size below then spans both, because the element is
+			// ordinary Element Data of this master.
+			payload = append(checksumElement(f.crcID, payload), payload...)
+		}
 		if int64(len(payload)) > MaxKnownSize {
 			return w.fail(&SizeRangeError{Size: int64(len(payload))})
 		}
