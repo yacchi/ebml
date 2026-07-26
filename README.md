@@ -18,6 +18,10 @@ mechanisms, not requirements. [`docs/`](docs/) collects the design notes behind
 that, starting with
 [the shape of a pull across languages](docs/pull-shape-across-languages.md).
 
+This file explains the library. [`go/README.md`](go/README.md) is the map of the
+Go implementation instead — the package inventory, the enforced dependency
+direction, which entry point to pick, and the commands.
+
 ## Core first
 
 The cursor is a **token pull loop**: input is pushed in chunks with `Feed`, and
