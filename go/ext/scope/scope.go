@@ -63,7 +63,6 @@ func (t *Tracker) Observe(n parser.Node) (done *Scope, err error) {
 			}
 		}
 		if t.current != nil {
-			t.current.rev++
 		}
 		return done, nil
 	}
@@ -78,7 +77,6 @@ func (t *Tracker) Observe(n parser.Node) (done *Scope, err error) {
 				master: node.ID(),
 				start:  node.Offset(),
 				end:    -1,
-				rev:    1,
 			}
 			el := element(node)
 			t.stack = append(t.stack, openElement{element: el, depth: node.Depth()})
@@ -86,7 +84,6 @@ func (t *Tracker) Observe(n parser.Node) (done *Scope, err error) {
 		}
 		el := element(node)
 		t.stack = append(t.stack, openElement{element: el, depth: node.Depth()})
-		t.current.rev++
 	case *parser.LeafNode:
 		if t.current != nil && len(t.stack) > 0 {
 			el := element(node)
@@ -95,7 +92,6 @@ func (t *Tracker) Observe(n parser.Node) (done *Scope, err error) {
 			if len(t.stack) == 1 {
 				t.current.add(el)
 			}
-			t.current.rev++
 		}
 	}
 	return done, nil
@@ -133,7 +129,6 @@ type Scope struct {
 	master parser.ElementID
 	start  int64
 	end    int64
-	rev    uint64
 	// children holds every directly completed child in stream order. One ordered
 	// slice is the whole index: Get, GetAll and IDs are all derived from it by a
 	// linear scan. A scope holds a master's direct children -- a handful of
@@ -199,14 +194,6 @@ func (s *Scope) IDs() []parser.ElementID {
 		out = append(out, el.ID)
 	}
 	return out
-}
-
-// Rev returns the revision of the scope.
-func (s *Scope) Rev() uint64 {
-	if s == nil {
-		return 0
-	}
-	return s.rev
 }
 
 // Master returns the scoped master's ID.

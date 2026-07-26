@@ -235,39 +235,9 @@ func TestRetainedBytesAreCopied(t *testing.T) {
 	}
 }
 
-func TestRevChangesOnEveryRecord(t *testing.T) {
-	raw := ebmltest.Encode(ebmltest.Master(matroska.IDSegment,
-		ebmltest.Master(matroska.IDInfo),
-	))
-	s := stream.New(bytes.NewReader(raw), matroska.KindForElementID)
-	tkr := scope.NewTracker(matroska.IDSegment, s)
-	var before uint64
-	for {
-		n, err := s.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tkr.Observe(n); err != nil {
-			t.Fatal(err)
-		}
-		if cur := tkr.Current(); cur != nil {
-			if cur.Rev() <= before {
-				t.Fatalf("Rev = %d did not increase from %d", cur.Rev(), before)
-			}
-			before = cur.Rev()
-		}
-		if m, ok := n.(*parser.MasterNode); ok {
-			m.Descend()
-		}
-	}
-}
-
 func TestNilScopeQueriesAreSafe(t *testing.T) {
 	var s *scope.Scope
-	if s.Get(1) != nil || s.GetAll(1) != nil || s.IDs() != nil || s.Rev() != 0 ||
+	if s.Get(1) != nil || s.GetAll(1) != nil || s.IDs() != nil ||
 		s.Master() != 0 || s.Start() != 0 || s.End() != -1 {
 		t.Fatal("nil Scope query was not safe")
 	}
