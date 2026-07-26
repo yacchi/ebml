@@ -284,6 +284,16 @@ func (f *Fragment) ClusterTimestamp() uint64 {
 // Cluster's timestamp, which is why the sum is computed as a signed tick count;
 // the result is therefore negative when a Cluster near time zero carries such a
 // block. It returns 0 for a nil block.
+//
+// The result is measured from whatever origin the SEGMENT's timeline uses, which
+// Matroska does not fix: a file typically starts its first Cluster at zero, so the
+// value reads as an elapsed media time, while a live stream may write an
+// epoch-based Cluster Timestamp -- Amazon Connect's KVS output does -- and then
+// the value is an offset from the Unix epoch, decades long, and NOT a media
+// duration. This package does not guess which: a consumer that knows its stream's
+// origin converts, typically time.Unix(0, int64(BlockTime())). ClusterTimestamp
+// and TimestampScale expose the raw operands for a consumer that would rather
+// build the time itself.
 func (f *Fragment) BlockTime(b *parser.SimpleBlock) time.Duration {
 	if f == nil || b == nil {
 		return 0
@@ -294,7 +304,8 @@ func (f *Fragment) BlockTime(b *parser.SimpleBlock) time.Duration {
 
 // StartTime returns the BlockTime of the fragment's FIRST block in stream order,
 // and 0 when it carries none. It is a block START time: it says when the first
-// block's content begins.
+// block's content begins. Being a BlockTime, it is measured from the Segment's own
+// timeline origin and is not necessarily an elapsed media time -- see BlockTime.
 func (f *Fragment) StartTime() time.Duration {
 	if f == nil || len(f.Blocks) == 0 {
 		return 0
@@ -309,12 +320,31 @@ func (f *Fragment) StartTime() time.Duration {
 // duration, which Matroska does not state for a SimpleBlock: how long the last
 // block lasts follows from the codec and the frame count, which only the consumer
 // knows. EndTime - StartTime therefore spans the block starts and is shorter than
-// the media the fragment actually carries.
+// the media the fragment actually carries. That DIFFERENCE is a true duration
+// whatever the Segment's timeline origin is; each endpoint on its own is not --
+// see BlockTime.
 func (f *Fragment) EndTime() time.Duration {
 	if f == nil || len(f.Blocks) == 0 {
 		return 0
 	}
 	return f.BlockTime(f.Blocks[len(f.Blocks)-1])
+}
+
+// TrackPCMByName returns the payload of the track whose Name is name, and is to
+// TrackPCM what TrackByName is to Track: it is how a stream that identifies its
+// channels by name is read without assuming a track numbering. It returns nil
+// both when no track carries that Name and when the track carries no block, the
+// same conflation TrackPCM makes; TrackByName is what distinguishes them.
+func (f *Fragment) TrackPCMByName(name string) []byte {
+	entry, ok := f.TrackByName(name)
+	if !ok {
+		return nil
+	}
+	number, err := entry.Find(matroska.IDTrackNumber).AsUint()
+	if err != nil {
+		return nil
+	}
+	return f.TrackPCM(number)
 }
 
 // TrackPCM returns the concatenated frame bytes (the PCM payload) of every block

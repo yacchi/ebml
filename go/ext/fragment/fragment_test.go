@@ -543,6 +543,17 @@ func TestTwoTracks(t *testing.T) {
 			t.Fatalf("TrackByName(%q) did not resolve", name)
 		}
 	}
+	// A stream that identifies its channels by name reaches the same bytes without
+	// assuming a numbering, exactly as TrackByName pairs with Track.
+	if got := f.TrackPCMByName("AUDIO_FROM_CUSTOMER"); !reflect.DeepEqual(got, wantTrack1) {
+		t.Fatalf("TrackPCMByName(AUDIO_FROM_CUSTOMER) = %x, want %x", got, wantTrack1)
+	}
+	if got := f.TrackPCMByName("AUDIO_TO_CUSTOMER"); !reflect.DeepEqual(got, wantTrack2) {
+		t.Fatalf("TrackPCMByName(AUDIO_TO_CUSTOMER) = %x, want %x", got, wantTrack2)
+	}
+	if got := f.TrackPCMByName("nope"); got != nil {
+		t.Fatalf("TrackPCMByName(nope) = %x, want nil", got)
+	}
 }
 
 func TestGap(t *testing.T) {
