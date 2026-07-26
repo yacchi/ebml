@@ -111,8 +111,12 @@ func printFragment(w io.Writer, index int, f *fragment.Fragment, metadata kvs.Me
 	}
 	fmt.Fprintf(w, "  cluster_timestamp: %d (scale %d ns)\n", f.ClusterTimestamp(), f.TimestampScale())
 	fmt.Fprintf(w, "  timestamp_scale:   %d ns\n", f.TimestampScale())
-	fmt.Fprintf(w, "  start_time:        %s\n", f.StartTime())
-	fmt.Fprintf(w, "  end_time:          %s\n", f.EndTime())
+	// KVS writes an epoch-based Cluster.Timestamp, so the core accessors -- which
+	// measure from the Segment's own origin, whatever it is -- are read as wall-clock
+	// time through this package. Printing f.StartTime() directly would show a
+	// decades-long duration, which is correct and useless.
+	fmt.Fprintf(w, "  start_time:        %s\n", kvs.StartTime(f).Format(time.RFC3339Nano))
+	fmt.Fprintf(w, "  end_time:          %s\n", kvs.EndTime(f).Format(time.RFC3339Nano))
 
 	tracks := f.Tracks()
 	if len(tracks) == 0 {
