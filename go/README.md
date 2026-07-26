@@ -29,7 +29,7 @@ exported core API.
 | `tree` | core | The retained document model: loose `Descendants`, strict `Find`, `Marshal`, `VerifyChecksum`. |
 | `stream` | core | Owns an `io.Reader` and answers `NeedMoreData`. Whole reading surface: `Nodes() iter.Seq2[parser.Node, error]`. |
 | `ext/scope` | ext | Tracks one master and the elements that completed directly inside it. |
-| `ext/tags` | ext | Target-aware views over observed `Tags`. The only tag-traversal implementation. |
+| `ext/tags` | ext | Target-aware views over retained `Tags`. The only tag-traversal implementation, and the only place tag accessors live. |
 | `ext/fragment` | ext | Assembles one `Fragment` per completed `Cluster`, with recovery and delivery options. |
 | `kvs` | separate module | All Amazon KVS knowledge: tag names, typed `Metadata`, wall-clock times, `MetadataComplete`. No AWS SDK dependency. |
 | `cmd/ebml` | binary | The `ebml` CLI: `dump` and `xml`, both driving `stream`. |
@@ -50,16 +50,26 @@ parser  crc                 <- import nothing from this module
                |
              tree
 
-ext/scope    -> core
-ext/tags     -> ext/scope + core        (Read takes a *scope.Scope)
-ext/fragment -> ext/tags + core         (for Tag/Tags; NOT built on scope.Tracker)
-kvs          -> ext/fragment + core     (module 2)
+ext/scope    -> core                    <- every ext package is a leaf:
+ext/tags     -> core                       none imports another
+ext/fragment -> core
+kvs          -> ext/fragment + ext/tags + core      (module 2)
 ```
 
-Two rules are enforced, not merely intended: `parser` never imports `tree` (the
-StAX reader may not reach retained document state), and no core package imports
-anything from `ext/`. Within `ext/`, one package may use another's exported API —
-what `ext/fragment` deliberately does NOT do is build its assembly on
+Three rules are enforced, not merely intended: `parser` never imports `tree` (the
+StAX reader may not reach retained document state), no core package imports
+anything from `ext/`, and **no `ext` package imports another `ext` package**. An
+`ext` package is a way of USING the core, and a way of using something is not a
+prerequisite of another way of using it.
+
+That third rule is recent, and both edges it removed were the same mistake:
+`ext/fragment` imported `ext/tags` for `Fragment.Tag`/`Tags`, which were
+`ext/tags` applied to `Target{}` behind a plainer name, and `ext/tags` imported
+`ext/scope` for a `Read(*scope.Scope)` that gave the base name to the narrow
+case. A convenience accessor is how such an edge grows back, which is why the
+rule is a test and not a paragraph. A `kvs`-style consumer composes the two ext
+packages itself, which is the composition point that was always meant to hold
+it. Separately, `ext/fragment` deliberately does NOT build its assembly on
 `scope.Tracker`, and its doc says why a future reader should not "fix" that.
 
 ## Choosing an entry point
@@ -601,44 +611,61 @@ func main() {
 
 ### `ext/tags`
 
-`tags.Read` computes a view of the `Tags` elements observed in a scope. A tag
-applies to the whole Segment by default; `Targets` narrows it by target type or
-UID. Multiple `Tags` elements are cumulative and positionless under RFC 9559, so
-tags after a Cluster remain readable. RFC 9559 does not define precedence for a
-repeated `TagName`; this library chooses last-wins, unlike `net/http.Header.Get`,
-which returns the first value.
+`tags.Read` computes a view of the `Tag` elements found under the roots it is
+given. A tag applies to the whole Segment by default; `Targets` narrows it by
+target type or UID. Multiple `Tags` elements are cumulative and positionless
+under RFC 9559, so tags after a Cluster remain readable. RFC 9559 does not
+define precedence for a repeated `TagName`; this library chooses last-wins,
+unlike `net/http.Header.Get`, which returns the first value.
+
+`Read` takes roots because every retention path in this library ends in a
+`*tree.Element`. A root is an element that *contains* the tags and is searched to
+any depth — never a `Tag` itself, which would yield an empty view. `ReadFrom` is
+the adapter for a producer that indexes elements by ID:
+
+| what the caller holds | the call |
+| --- | --- |
+| a `*fragment.Fragment` | `tags.Read(frag.Segment)` |
+| a retained Segment tree | `tags.Read(segment)` |
+| a `*scope.Scope` | `tags.ReadFrom(sc)` |
+
+Roots must not overlap: an element passed together with one of its own ancestors
+contributes its tags twice.
+
+`ReadFrom` exists so that naming the `Tags` ID stays this package's job. The call
+it replaces — `tags.Read(sc.GetAll(matroska.IDTags)...)` — has two silent failure
+modes and no loud one: `IDTag` instead of `IDTags` yields an empty view, and
+`Get` instead of `GetAll` keeps only the last `Tags` element, discarding what a
+live stream wrote before its Cluster. Its `Source` interface is satisfied by the
+`GetAll` that `scope` already has for its own sake, so `scope` implements nothing
+and stays element-agnostic, and `tags` imports no other `ext` package.
+
+That is the general rule here: **no `ext` package imports another**, pinned by
+`internal/archtest`. `ext/fragment` therefore has no tag accessor of its own — a
+fragment's `Segment` is an ordinary retained element, and reading its tags is
+this package applied to it:
 
 ```go
 package main
 
 import (
-	"bytes"
 	"fmt"
+	"os"
 
-	"github.com/yacchi/ebml/ext/scope"
-	"github.com/yacchi/ebml/stream"
+	"github.com/yacchi/ebml/ext/fragment"
 	"github.com/yacchi/ebml/ext/tags"
-	"github.com/yacchi/ebml/matroska"
-	"github.com/yacchi/ebml/parser"
 )
 
 func main() {
-	src := stream.New(bytes.NewReader(nil), matroska.KindForElementID)
-	tracker := scope.NewTracker(matroska.IDSegment, src)
-	for node, err := range src.Nodes() {
+	for frag, err := range fragment.NewReader(os.Stdin).Fragments() {
 		if err != nil {
 			panic(err)
 		}
-		if _, err := tracker.Observe(node); err != nil {
-			panic(err)
-		}
-		if master, ok := node.(*parser.MasterNode); ok {
-			master.Descend()
-		}
+		set := tags.Read(frag.Segment)
+		contact, _ := set.Get(tags.Target{}, "ContactId")
+		title, _ := set.Get(tags.Target{TypeValue: 30, TrackUID: 1}, "TITLE")
+		fmt.Println(contact, title)
 	}
-	set := tags.Read(tracker.Finish())
-	value, _ := set.Get(tags.Target{}, "ContactId")
-	fmt.Println(value)
 }
 ```
 
@@ -699,9 +726,10 @@ func main() {
 
 ### Tag inheritance
 
-Tag inheritance is not something `ext/fragment` decides: `Fragment.Tags`
-returns exactly what that fragment's `Tags` element carried, non-nil and empty
-when it carried none. The policy lives one layer up, in `kvs`, and it inherits
+Tag inheritance is not something `ext/fragment` decides: `tags.Read` over a
+fragment's `Segment` returns exactly what that fragment's `Tags` element
+carried, and `All` is non-nil and empty when it carried none. The policy lives
+one layer up, in `kvs`, and it inherits
 per key rather than per whole `Tags` element — a key seen on any fragment of a
 given SegmentUUID stays available to later fragments of that same UUID,
 regardless of which other keys the current fragment carries.
@@ -909,7 +937,7 @@ step and the command it runs.
 
 | Package | Role |
 | --- | --- |
-| `archtest` | Pins the core dependency graph above. |
+| `archtest` | Pins the core dependency graph above, and that every `ext` package is a leaf. |
 | `ebmltest` | The one shaping layer over the public writer API for hand-built test inputs (`Leaf`/`Uint`/`String`/`UTF8`/`Master`/`UnknownMaster`/`Encode`). |
 | `ebmltrace` | Produces the golden cursor traces in `../golden/`. |
 | `kvsgen` | Builds the synthetic fixture corpus through the public writer; `genfixtures` writes it out. |

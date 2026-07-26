@@ -75,6 +75,58 @@ carries no meaning.
 * Where RFC 9559 is silent, the library states its choice in documentation
   rather than leaving behavior implicit. Tag traversal and precedence rules
   have exactly one implementation in `ext/tags`.
+* `ext/tags` is the ONLY place a tag accessor lives, and it names no producer.
+  `Read(roots ...*tree.Element)` is the base entry: every retention path in this
+  library ends in a `*tree.Element`, so the retained element is the shared
+  currency and a fragment passes `frag.Segment`. `ReadFrom(Source)` is the one
+  adapter, for a producer that indexes elements BY ID, and it exists so that
+  naming `matroska.IDTags` stays this package's job — the call it replaced,
+  `Read(sc.GetAll(matroska.IDTags)...)`, had two silent failure modes and no loud
+  one: `IDTag` for `IDTags` yields an EMPTY view, because a root is searched
+  rather than counted, and `Get` for `GetAll` keeps only the LAST `Tags` element,
+  discarding what a live stream wrote before its `Cluster`. `Source` is satisfied
+  by the `GetAll` that `ext/scope` already has FOR ITS OWN SAKE; a purpose-built
+  method (`TagRoots`, say) would put Matroska tag knowledge into whatever
+  implemented it, and `ext/scope` is element-agnostic by rule, so it could not.
+  That distinction — an incidental method versus one invented for the consumer —
+  is what makes this interface admissible where the other is not. Two entries are
+  the ceiling and each must keep its correct name: the package once had
+  `Read(*scope.Scope)` beside `ReadElement`, giving the PLAINER name to the
+  NARROWER case, and the result was a consumer holding a Fragment reading "from a
+  retained Segment scope" and concluding tags were a scope feature reachable only
+  by running a Tracker — when `ReadElement(f.Segment)` was what `Fragment.Tag`
+  already called internally. Never name a special case with the base name.
+* A CROSS-PACKAGE CLAIM IS EITHER COMPILER-CHECKED OR DELETED; it is never left
+  standing in prose. Removing the `ext/fragment` -> `ext/tags` import while
+  leaving `Fragment.Segment`'s doc explaining `tags.Read`, `tags.Target{}` and
+  why `Tag`/`Tags` went away just moved the dependency somewhere nothing
+  recompiles -- and it was a THIRD copy of a rationale `internal/archtest` and
+  this file already carried, which is the same three-copies-drift-apart shape as
+  the stream boundary rule. What replaced it: `var _ tags.Source =
+  (*scope.Scope)(nil)` in `ext/tags`'s test asserts what the `Source` doc used to
+  merely say, and `ext/fragment`'s Example -- runnable and output-checked --
+  shows `tags.Read(frag.Segment)` instead of a comment describing it. A package
+  doc may state its own contract and describe the SHAPES it accepts in core
+  types; it may not assert what a sibling package documents, what design rule a
+  sibling follows, or which type satisfies its interface. `ext/scope` no longer
+  justifies its last-wins `Get` by citing `ext/tags` either: an element-agnostic
+  package that names a Matroska tag reader has already stopped being one.
+* NO `ext` PACKAGE IMPORTS ANOTHER `ext` PACKAGE, pinned by
+  `internal/archtest.TestExtPackagesAreLeaves`, which discovers the package list
+  rather than holding one (a prohibition that skips a package it has not heard of
+  is not a prohibition). An ext package is a way of USING the core, and a way of
+  using something is not a prerequisite of another way of using it. Both edges
+  this removed were the same mistake — a capability wearing a plainer name:
+  `ext/fragment` imported `ext/tags` for `Fragment.Tag`/`Tags`, each of them
+  `ext/tags` applied to `Target{}`, and `ext/tags` imported `ext/scope` for the
+  `Read(*scope.Scope)` above. A convenience accessor is exactly how such an edge
+  grows back, which is why the rule is a TEST and not a paragraph. A consumer
+  composes the two, as `go/kvs` does. `ext/fragment` therefore offers NO tag
+  accessor: a fragment's tags are `tags.Read(frag.Segment)`, which also stops the
+  per-call rebuild the methods hid — five names cost five walks of the Segment
+  where one `Set` answers all five. A TEST may still import a sibling ext package
+  (`go list -deps` reports the shipped, non-test graph), and proving that
+  `ext/tags` reads what `ext/fragment` retains is what such a test is for.
 * The reading core has exactly ONE surface: a streaming pull operation, `Cursor.Next`,
   returning a closed `Node` (`*MasterNode`/`*LeafNode`/`*EndNode`) one event at a
   time, not a document model. Never add a second push or callback event shape.
@@ -378,8 +430,8 @@ The core is working and tested:
   states its own precedence.
 * `go/ext/tags` computes target-aware views over observed `Tags` elements.
   Segment-default tags are cumulative and positionless, repeated names are
-  last-wins by library choice, and `ext/fragment.Fragment.Tag` and `Tags` are
-  re-expressed on it.
+  last-wins by library choice. It is the only tag-traversal implementation and
+  the only place tag accessors live: `ext/fragment` has none of its own.
 * `go/kvs` is a separate module holding all KVS-specific tag and metadata
   knowledge; the core module has no KVS element or tag knowledge left. The
   runnable example moved to `go/kvs/examples/getmedia`.
