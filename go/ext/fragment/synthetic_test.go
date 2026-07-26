@@ -337,6 +337,59 @@ func TestFragmentTagIsLastWins(t *testing.T) {
 	}
 }
 
+// TestFragmentTagNeedsADeclaredValue pins the shape a live stream sends: a
+// SimpleTag that names a tag without declaring a TagString states no value, so it
+// is not reported as the empty string and does not erase a value stated earlier
+// under last-wins.
+func TestFragmentTagNeedsADeclaredValue(t *testing.T) {
+	valueless := ebmltest.Master(matroska.IDTags,
+		ebmltest.Master(matroska.IDTag,
+			ebmltest.Master(matroska.IDSimpleTag,
+				ebmltest.UTF8(matroska.IDTagName, "state"),
+			),
+		),
+	)
+	raw := synFragment(
+		synTags("state", "real"),
+		valueless,
+		synCluster(0, synSimpleBlock(1, 0, []byte{0x01})),
+	)
+	frags := runWhole(t, raw)
+	if len(frags) != 1 {
+		t.Fatalf("got %d fragments, want 1", len(frags))
+	}
+	if got, ok := frags[0].Tag("state"); !ok || got != "real" {
+		t.Fatalf("Tag(state) = %q, %v; want real: an absent TagString is not an empty value", got, ok)
+	}
+	if got, present := frags[0].Tags()["state"]; got != "real" || !present {
+		t.Fatalf("Tags()[state] = %q, %v; want real to match Tag", got, present)
+	}
+}
+
+// TestFragmentTagRequiresATagParent pins what Tags documents: collection walks
+// Tag elements, so a SimpleTag sitting directly under Tags has no Targets to be
+// scoped by and is not reported.
+func TestFragmentTagRequiresATagParent(t *testing.T) {
+	orphan := ebmltest.Master(matroska.IDTags,
+		ebmltest.Master(matroska.IDSimpleTag,
+			ebmltest.UTF8(matroska.IDTagName, "state"),
+			ebmltest.UTF8(matroska.IDTagString, "orphan"),
+		),
+	)
+	frags := runWhole(t, synFragment(orphan, synCluster(0, synSimpleBlock(1, 0, []byte{0x01}))))
+	if len(frags) != 1 {
+		t.Fatalf("got %d fragments, want 1", len(frags))
+	}
+	if got, ok := frags[0].Tag("state"); ok {
+		t.Fatalf("Tag(state) = %q, %v; want no value for a SimpleTag outside a Tag", got, ok)
+	}
+	// The element is still retained and reachable by loose extraction: it is not
+	// reported as a TAG, not dropped from the tree.
+	if got := len(frags[0].Segment.Descendants(matroska.IDSimpleTag)); got != 1 {
+		t.Fatalf("retained SimpleTag count = %d, want 1", got)
+	}
+}
+
 // TestStructuralErrorIsTerminalWithoutResync checks the default: a structural
 // error is reported, the fragments completed before it are still returned, and the
 // assembler does not silently carry on.
