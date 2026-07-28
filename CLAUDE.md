@@ -137,11 +137,23 @@ Reading, writing, round-trip conformance, CRC-32 and element coverage are
 complete and tested; the package-by-package description of what exists lives in
 [`impl/go/README.md`](impl/go/README.md) and is not repeated here.
 
-Remaining work is VALUE coverage — decoding helpers for element types the
-registry now merely names — plus the checker-inventoried capabilities that do
-not exist yet (cardinality, `minver` gating, defaults, ranges, enums, fixed
-lengths, `recurring`, the WebM profile). The core stays terminal on structural
-corruption; recovery belongs to the opt-in `ext/fragment` paths.
+Element and value coverage are DONE, and the roadmap said otherwise for longer
+than it was true. Measured 2026-07-29 against CELLAR `f93ab02`/`a4b3c4a`
+(`docType="matroska" version="4"`): 0 mismatches, 270 of 273 elements registered,
+and ZERO of the elements the schema still declares current are missing — the
+three unregistered ones are REMOVED after version 0 and stay unregistered on
+purpose, so they cannot end an unknown-size master. All 133 WebM-profile elements
+are registered. Every schema value type has a decoder on `tree.Element`. The
+numbers, and how to re-measure them, are in
+[`impl/go/README.md`](impl/go/README.md#measured-conformance).
+
+Remaining work is VALIDATION, none of which exists: cardinality, `minver`
+gating, defaults, ranges, enums, fixed lengths, `recurring`, and WebM profile
+ENFORCEMENT — registration is complete, but nothing consults `DocType`, so a
+`webm` document using a Matroska-only element is read without comment. Each is a
+library capability to design first; the conformance check then follows for free.
+The core stays terminal on structural corruption; recovery belongs to the opt-in
+`ext/fragment` paths.
 
 ## Build and fixtures
 

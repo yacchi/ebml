@@ -1070,6 +1070,47 @@ Checking the registry against the official IETF CELLAR schemas needs them fetche
 first (they are never vendored); see `../../CLAUDE.md` for the `conformance-check`
 step and the command it runs.
 
+### Measured conformance
+
+Against CELLAR `matroska-specification` at `f93ab02` and `ebml-specification` at
+`a4b3c4a` (schema `docType="matroska" version="4"`), last run 2026-07-29:
+
+| | |
+| --- | --- |
+| Mismatches — the registry contradicting the schema | **0** |
+| Elements registered | **270 of the 273** the two schemas declare |
+| Elements the schema still declares CURRENT and the registry lacks | **0** |
+| WebM-profile elements registered | **133 of 133** |
+
+The three unregistered elements — `SilentTracks`, `SilentTrackNumber` and
+`EncryptedBlock` — are ones the schema marks REMOVED after version 0, and leaving
+them out is deliberate rather than pending: an unregistered ID can never end an
+unknown-size master, so a `Cluster` carrying one in an old file still closes
+where the boundary rule says it does. Registering them without adding them to
+`completeChildren` would break exactly that.
+
+Every value type the schema uses has a decoder — `AsUint`, `AsInt`, `AsFloat`,
+`AsString`, `AsTime` and `Bytes` on `tree.Element`, plus `ParseSimpleBlock` for
+the block framing inside a binary payload — so element coverage is not the
+outstanding work. What is outstanding is validation, and none of it exists:
+
+| The schema declares | On how many elements | What it would take |
+| --- | --- | --- |
+| `maxOccurs` / `minOccurs` | 241 | cardinality validation |
+| `minver` | 113 | `DocTypeVersion` gating |
+| `default` | 77 | resolving an absent element to its default |
+| `range` | 71 | value-range validation |
+| `restriction`/`enum` | 29 | enumerated value names |
+| `length` | 12 | fixed payload-length validation |
+| `recurring` | 3 | the once-per-Segment rule |
+| the WebM profile marker | 133 | restricting a `webm` document to its subset |
+
+Each row is a capability this library does not have, not a hole in the checker.
+The last one is worth reading carefully: every WebM element IS registered, so
+WebM documents read and write correctly — what is absent is ENFORCEMENT. Nothing
+here consults `DocType`, so a document claiming `webm` while using a
+Matroska-only element is read exactly as the bytes say, and no one is told.
+
 ## `internal/`
 
 | Package | Role |
