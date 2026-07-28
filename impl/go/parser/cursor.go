@@ -770,7 +770,10 @@ func (c *Cursor) dequeueClose() (n Node, err error, ok bool) {
 // Finalize declares that no more bytes will arrive. It closes the masters still
 // open -- an unknown-size master such as a KVS Segment is closed here -- and
 // reports TruncatedError when the stream ends inside a header or inside a declared
-// payload.
+// payload. That error carries the evidence a consumer classifies a truncated tail
+// by -- the absolute offset at which the input ended, and the element open there --
+// because whether the tail is expected depends on the caller's transport, not on
+// the stream; see TruncatedError.
 //
 // Call it after Next has reported NeedMoreData, i.e. once the bytes fed have been
 // drained. Those masters are reported as EndNodes by the following Next calls,

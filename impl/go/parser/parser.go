@@ -158,6 +158,13 @@ func (p *Parser) available() int {
 	return len(p.buf) - p.pos
 }
 
+// endOfInput is the absolute offset one past the last byte fed: the cursor's
+// position plus everything fed but not yet consumed. It is where a truncated
+// input ended, which is what TruncatedError.EndOffset reports.
+func (p *Parser) endOfInput() int64 {
+	return p.absOffset + int64(p.available())
+}
+
 // Unconsumed returns a copy of the bytes that were fed but not yet consumed, the
 // first of which sits at absolute offset Offset().
 //
@@ -349,7 +356,13 @@ type ClosedMaster struct {
 func (p *Parser) FinalizeEOF() ([]ClosedMaster, error) {
 	var closed []ClosedMaster
 	if p.current != nil && p.current.size >= 0 && p.current.size > int64(p.available()) {
-		return closed, TruncatedError{Msg: "element payload"}
+		// The header was read in full, so the cut element's own ID is known.
+		return closed, TruncatedError{
+			Msg:       "element payload",
+			EndOffset: p.endOfInput(),
+			ID:        p.current.id,
+			HasID:     true,
+		}
 	}
 	for len(p.stack) > 0 {
 		top := p.stack[len(p.stack)-1]
@@ -362,7 +375,15 @@ func (p *Parser) FinalizeEOF() ([]ClosedMaster, error) {
 	if p.current == nil && p.available() > 0 {
 		if _, err := p.Peek(); err != nil {
 			if _, ok := err.(NeedMoreData); ok {
-				return closed, TruncatedError{Msg: "element header"}
+				// The cut fell inside the header, so the element has no ID yet.
+				// The masters that ended have already been popped above, so the
+				// stack top is the innermost master still open around the cut;
+				// an empty stack means nothing was open.
+				tr := TruncatedError{Msg: "element header", EndOffset: p.endOfInput(), InHeader: true}
+				if len(p.stack) > 0 {
+					tr.ID, tr.HasID = p.stack[len(p.stack)-1].id, true
+				}
+				return closed, tr
 			}
 			return closed, err
 		}

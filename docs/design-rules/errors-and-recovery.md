@@ -72,6 +72,38 @@ every fixture must parse cleanly and round-trip byte-identically, which a
 truncated one cannot. It is covered by package-level synthetic tests in both
 modules instead.
 
+## The truncated tail carries evidence, never a verdict
+
+Whether a truncated tail is a fault is the CONSUMER's question, and the library
+cannot answer it: a live GetMedia connection ending at an arbitrary byte is
+normal, while a finite `GetMediaForFragmentList` body ending mid-element is a
+transfer fault, and the bytes are identical in both cases. So the classification
+stays with the caller and `parser.TruncatedError` supplies what the caller
+cannot measure for itself — `EndOffset`, the absolute offset at which the input
+ended, and `ID`/`HasID`, the element that was open there. An Info-versus-Warn
+split then rests on a measurement instead of an assumption
+(`plans/KVS-CONSUMER-FEEDBACK-ROUND4.md`, F10).
+
+`ID` has ONE meaning in every case: the innermost element still open at
+`EndOffset`. What changes is whether that element is the one the cut destroyed,
+and `InHeader` says which without reading the message — because a cut inside a
+HEADER loses the ID VINT itself, so no ID is invented for the element that was
+arriving and `ID` names its enclosing master instead. `HasID` is false when the
+cut fell at the top level with nothing open, a distinction a zero ID cannot
+state. Discriminating on `Msg` instead would be classifying by message text,
+which this repository does not do anywhere else and does not start here.
+
+NOT EVERY SHORT INPUT IS A `TruncatedError`. A tail that ends on an element
+boundary inside a known-size master is not cut mid-element at all: the master's
+declared end is simply never reached, which the cursor reports as an `Invalid`.
+That shape carries none of this evidence, so a consumer classifying a short tail
+handles both errors rather than assuming the evidence is always there.
+
+The evidence lives in FIELDS and never in the message. `Error()` stays exactly
+`truncated input` or `truncated input: <msg>`, because the committed golden
+traces and every consumer that logs the string would otherwise change meaning
+for a diagnostic that added nothing to what they already print.
+
 ## An in-band failure is reported, never merely available
 
 GetMedia states a failure as `AWS_KINESISVIDEO_ERROR_CODE` tags on a fragment

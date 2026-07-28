@@ -321,6 +321,24 @@ built on top of it adds the second failure class:
 normal flow control for incremental input and is neither class — it means the next
 `Feed` is the answer, and `IsStructural` is false for it.
 
+`parser.TruncatedError` — the input ended inside an element — carries the evidence
+for a decision this library cannot make. Whether a truncated tail is a fault
+depends on the transport, not on the bytes: a live connection ending at an
+arbitrary offset is normal, a finite body ending mid-element is a transfer fault.
+So `errors.As` it and read the fields: `EndOffset` is the absolute offset at which
+the input ended, on the same axis as `Node.Offset` (`WithStartOffset` included),
+and `ID` is the innermost element open there once `HasID` says it names one.
+`InHeader` tells the two cuts apart: false means the cut fell inside a declared
+payload, so `ID` is the element that was cut; true means it fell inside a header,
+whose ID VINT is part of what was lost, so `ID` names the enclosing master
+instead. The message stays `truncated input` / `truncated input: <msg>`; the
+evidence is in fields, never in the text, and never read out of `Msg`.
+
+A tail that ends on an element boundary inside a **known-size** master is not a
+`TruncatedError` at all — nothing was cut mid-element, the master's declared end
+is just never reached — and arrives as an `Invalid`. Classify a short tail on
+both.
+
 A pull cursor never runs consumer code, so it cannot raise a content error itself;
 `parser.NewContentError(id, offset, err)` is how a consumer marks its own verdict
 as one — `ext/fragment` wraps an undecodable `SimpleBlock` in it. `IsStructural` is

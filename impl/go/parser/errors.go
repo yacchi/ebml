@@ -172,8 +172,58 @@ func (e PrematureCloseError) Unwrap() error {
 	return ErrPrematureClose
 }
 
+// TruncatedError reports that the input ended in the middle of an element: the
+// stream is structurally incomplete, whether or not that is a fault.
+//
+// Whether a truncated tail is expected is the CONSUMER's call and cannot be made
+// here -- a live connection that ends at an arbitrary byte is normal, a finite
+// body that ends mid-element is a transfer fault, and the cursor cannot tell the
+// two apart. What it can do is supply the evidence, which is what the fields
+// beyond Msg are for; the classification stays with the caller.
+//
+// EndOffset is the ABSOLUTE offset one past the last byte the cursor was fed, so
+// it is where the input ended, not where the cut element began. It is measured on
+// the same axis as Node.Offset and Parser.Offset, including any WithStartOffset.
+//
+// ID is the INNERMOST ELEMENT STILL OPEN at EndOffset, one meaning in every case:
+// an element whose declared payload was cut is itself open, and an element header
+// cut part-way through is inside whichever master encloses it. HasID says whether
+// ID names anything at all -- false means nothing was open, which the zero ID
+// cannot state on its own, and it is reachable, since input may end mid-header at
+// the top level.
+//
+// InHeader distinguishes the two cuts WITHOUT reading Msg, because the cut element
+// is ID only when it is false:
+//
+//   - InHeader false: the input ended inside a declared PAYLOAD, so ID is the
+//     element that was cut and its header had been read in full.
+//   - InHeader true: the input ended inside an element HEADER, so the cut element
+//     has NO ID yet -- the ID VINT is part of what was lost -- and none is invented
+//     for it. ID names its enclosing master, or nothing when HasID is false.
+//
+// Msg says the same thing in prose for a human reader, and is never the way to
+// tell: classifying by message text is what these fields exist to replace.
+// Error() is exactly "truncated input" or "truncated input: <Msg>" and carries
+// none of the evidence, so a message-matching consumer keeps working and a
+// diagnosing one reads fields.
+//
+// NOT EVERY SHORT INPUT ARRIVES HERE. A truncated tail that happens to end on an
+// element boundary INSIDE a known-size master is not cut mid-element at all; the
+// master's declared end is simply never reached, which the cursor reports as an
+// Invalid, not as a TruncatedError. Such an input carries no evidence of this
+// shape, so a consumer that classifies a short tail handles both errors.
 type TruncatedError struct {
 	Msg string
+	// EndOffset is the absolute offset at which the input ended.
+	EndOffset int64
+	// ID is the innermost element open at EndOffset; consult HasID first.
+	ID ElementID
+	// HasID reports whether ID names an element. False means no element was open.
+	HasID bool
+	// InHeader reports whether the cut fell inside an element header rather than
+	// inside a declared payload, which is what decides whether ID is the cut
+	// element or merely its enclosing master.
+	InHeader bool
 }
 
 func (e TruncatedError) Error() string {
