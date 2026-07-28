@@ -40,7 +40,8 @@ that has not finished yet is an ordinary input rather than a special case.
   with the Segment-level metadata describing it — including metadata a producer
   writes AFTER the Cluster, which is where hand-rolled readers quietly lose data.
   Amazon Kinesis Video Streams GetMedia and Amazon Connect are the worked case.
-* **Inspect a document from the shell.** `ebml dump` and `ebml xml`.
+* **Inspect a document from the shell.** [`ebml dump` and `ebml xml`](#the-ebml-command),
+  one CLI for the project.
 
 No third-party dependencies, in any implementation.
 
@@ -122,7 +123,47 @@ Where to go next:
   [`impl/go/README.md`, `ext/fragment`](impl/go/README.md#extfragment)
 * **Writing EBML, or round-tripping a document** →
   [`impl/go/README.md`, Writing](impl/go/README.md#writing)
-* **Just looking at a file** → [`impl/go/README.md`, CLI](impl/go/README.md#cli)
+* **Just looking at a file** → [the CLI](#the-ebml-command), below
+
+## The `ebml` command
+
+There is ONE CLI for the project, not one per implementation: `ebml`, with two
+subcommands, `dump` for an indented structural view and `xml` for an XML
+rendering. Both read raw EBML from a file or from stdin, and `--hex` decodes the
+commented hexadecimal fixture format this repository stores its corpus in.
+
+It is built from the Go implementation, so `go install` is how you get it:
+
+```bash
+go install github.com/yacchi/ebml/impl/go/cmd/ebml@main
+```
+
+That puts the binary in `$(go env GOPATH)/bin`. There is no release tag yet,
+which is why the query above names a branch; once one exists, `@latest` or an
+explicit `@v0.1.0` works the same way. The version is written WITHOUT the
+`impl/go/` tag prefix the repository tags carry — the go tool derives that from
+the module path itself.
+
+```bash
+ebml dump path/to/file.mkv
+ebml dump --hex fixtures/kvs/topology_basic.ebml.hex
+ebml xml  --hex fixtures/kvs/topology_basic.ebml.hex
+cat recording.mkv | ebml dump
+```
+
+`dump` on `topology_basic.ebml.hex` begins:
+
+```text
+EBML (0x1A45DFA3) [offset 0, size 19]
+  EBMLVersion (0x4286) [type uint, offset 5, size 1] = 1
+  EBMLReadVersion (0x42F7) [type uint, offset 9, size 1] = 1
+  DocType (0x4282) [type string, offset 13, size 8] = "matroska"
+Segment (0x18538067) [offset 24, size unknown]
+  Info (0x1549A966) [offset 36, size 26]
+```
+
+Running it from a checkout instead of installing it is in
+[`impl/go/README.md`, CLI](impl/go/README.md#cli).
 
 ## What it is not
 
@@ -151,10 +192,13 @@ and adding a language never rearranges it.
 | `impl/ts/` | — | Placeholder. Not an implementation. | — |
 | `impl/py/` | — | Placeholder. Not an implementation. | — |
 
-This file stays language-neutral apart from the quick start, which belongs to
-whichever implementations exist: what the library is, what the contract is, and
-what every implementation shares. A second implementation therefore costs it a
-row in the table above and a quick start of its own — never a rewrite.
+This file stays language-neutral apart from the two things that belong to the
+project rather than to a language: the quick start of whichever implementations
+exist, and the `ebml` command, which is one CLI for the project and not one per
+implementation. Everything else here is what the library is, what the contract
+is, and what every implementation shares. A second implementation therefore
+costs it a row in the table above and a quick start of its own — never a
+rewrite.
 
 ## What every implementation shares
 

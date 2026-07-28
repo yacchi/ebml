@@ -925,7 +925,13 @@ round trips are checked byte-for-byte in the test suite.
 
 ## CLI
 
-Run from this directory:
+`cmd/ebml` builds the project's ONE CLI, which is not a Go-specific tool and is
+therefore documented at the root: what `dump` and `xml` do, how to install the
+binary, and what its output looks like are in
+[the root `README.md`](../../README.md#the-ebml-command).
+
+What belongs here is running it from a checkout, without installing anything.
+From this directory:
 
 ```bash
 go run ./cmd/ebml dump path/to/file.mkv
@@ -933,19 +939,9 @@ go run ./cmd/ebml dump --hex ../../fixtures/kvs/topology_basic.ebml.hex
 go run ./cmd/ebml xml --hex ../../fixtures/kvs/topology_basic.ebml.hex
 ```
 
-The dump is an indented structural view. A current sample from `topology_basic.ebml.hex` begins:
-
-```text
-EBML (0x1A45DFA3) [offset 0, size 19]
-  EBMLVersion (0x4286) [type uint, offset 5, size 1] = 1
-  EBMLReadVersion (0x42F7) [type uint, offset 9, size 1] = 1
-  DocType (0x4282) [type string, offset 13, size 8] = "matroska"
-Segment (0x18538067) [offset 24, size unknown]
-  Info (0x1549A966) [offset 36, size 26]
-```
-
-`dump` and `xml` accept raw EBML from a file or stdin; `--hex` decodes the
-commented fixture format.
+It is an ordinary consumer of the exported API — `stream`, `matroska` and
+`tree`, nothing internal — so its own package holds only flag parsing and
+rendering.
 
 ## Working across the two modules
 

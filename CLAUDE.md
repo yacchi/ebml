@@ -181,12 +181,17 @@ cursor operation, replayed under all split patterns from
 
 * `spec/SPEC.md` — the normative portable contract.
 * Root `README.md` — LANGUAGE-NEUTRAL: what the library is, the contract, the
-  implementation table, and what every implementation shares. It shows no code
-  in any one language, so a second implementation costs it one table row and
-  nothing else.
-* `impl/go/README.md` — the whole of the Go documentation: package map,
+  implementation table, and what every implementation shares, plus the two
+  things that belong to the PROJECT rather than to a language — the quick start
+  of whichever implementations exist, and the `ebml` CLI. A second
+  implementation costs it one table row and one quick start, nothing else.
+* The `ebml` CLI is ONE TOOL FOR THE PROJECT, not one per implementation, so
+  what it does, how to install it and what it prints live at the ROOT. The
+  implementation that happens to build it documents only running it from a
+  checkout.
+* `impl/go/README.md` — the whole of the Go LIBRARY documentation: package map,
   dependency direction, entry-point selection, usage core-first then extensions,
-  commands. Go usage has exactly ONE home; never restate it at the root, and
+  writing. Go usage has exactly ONE home; never restate it at the root, and
   never add a per-language section there.
 * `docs/` — design notes too long for a package doc, NOT normative. Each is
   listed in `docs/README.md`; a new one goes there in the same change.
