@@ -807,6 +807,45 @@ key exactly when it is needed; the `partial_tags` fixture exercises it.
 `WithoutTagInheritance()` turns the policy off, and `Metadata.Tags` is then
 exactly what the fragment carried.
 
+### Writing a PutMedia producer
+
+The module names the producer profile as well, because a PutMedia producer and a
+real capture do not want the same document and the difference is not guessable:
+
+| | a real capture from the field | a PutMedia producer |
+| --- | --- | --- |
+| `Segment` | unknown-size | unknown-size (same) |
+| `Cluster` | unknown-size | **known-size, `writer.Buffered()`** |
+
+The Cluster differs because of the SINK, not the format. PutMedia takes the
+document over a pipe and a producer wants one contiguous write per fragment,
+which is exactly what `Buffered()` emits at `EndMaster`; an unknown-size Cluster
+streams its children as they are written and turns one fragment into many writes.
+Both shapes are legal and this library reads either — the corpus models the
+unknown-size one throughout, because that is what the field sends.
+
+What `Cluster.Timestamp` MEANS is decided by the `x-amzn-fragment-timecode-type`
+header of the caller's own PutMedia request, so the module names both values and
+supplies the conversion for the one that needs it:
+
+```go
+scale := fragment.DefaultTimestampScale // 1 ms; write the same value into Info
+ticks, err := kvs.ClusterTimestamp(time.Now(), scale)
+```
+
+`kvs.ClusterTimestamp` is the inverse of `kvs.ClusterTime`: under
+`kvs.FragmentTimecodeTypeAbsolute` a Cluster timestamp counts from the UNIX
+EPOCH, not from the start of the stream. Under
+`kvs.FragmentTimecodeTypeRelative` it is an elapsed duration in ticks and no
+helper is needed. A document written under one convention and read under the
+other parses perfectly and means something else, which is why the choice is
+named here rather than left to a comment.
+
+There is deliberately no `kvs.FragmentWriter`: `writer` is the only encoder, and
+a type that composed its calls would be a wrapper hiding the two decisions above
+rather than stating them. See
+[Declined additions](../../docs/design-rules/declined-additions.md).
+
 ### `examples/getmedia`
 
 `impl/go/integrations/kvs/examples/getmedia` is a runnable, end-to-end demonstration of driving

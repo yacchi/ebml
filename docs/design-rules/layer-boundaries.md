@@ -220,6 +220,23 @@ why it is written down rather than left to inference; moving it means amending
 `impl/go/integrations/doc.go` first, so the change is a decision on the record
 and not one module quietly growing a client.
 
+An integration is NOT a reading layer. It happened to start as one, but a system
+that is written TO has conventions in the same sense a system that is read from
+does, and they belong in the same place: `integrations/kvs` names the PutMedia
+producer profile — an unknown-size Segment holding a KNOWN-SIZE Cluster, and
+which of `x-amzn-fragment-timecode-type`'s two values a `Cluster.Timestamp` was
+written under — because that is layout knowledge about one outside system. The
+API line is unchanged and is what keeps this honest: the profile states the
+document shape and holds no request, no header and no pipe.
+
+What an integration must NOT become on the write side is a second encoder or a
+wrapper around the first. `impl/go/writer` stays the only one
+([The writer, round-tripping, and CRC-32](writer-and-crc.md)), so the profile is
+constants, one conversion the caller cannot derive, and a documented pair of
+`writer.SizeStrategy` choices — never a `FragmentWriter` type that composes
+`writer` calls on the caller's behalf. That shape was asked for and declined
+([Declined additions](declined-additions.md)).
+
 Being separate modules is what keeps a dependency, a vocabulary and a release
 cadence belonging to one outside system out of the core's.
 
