@@ -1,4 +1,30 @@
 // Package tags reads Matroska Tags elements out of retained tree elements.
+//
+// It reads tags generically, by name: what a particular producer's tag names
+// MEAN is knowledge about that producer, and this package holds none of it.
+//
+// # Amazon Kinesis Video Streams
+//
+// The tag vocabulary of a KVS GetMedia stream is named in
+// github.com/yacchi/ebml/impl/go/integrations/kvs. That is a SEPARATE Go module:
+// requiring github.com/yacchi/ebml/impl/go does not make it resolvable, so a
+// consumer names it in its own go get. Reading those tags through this package
+// by hand leaves the reader to rediscover what that module already states:
+// Metadata, the typed per-fragment view; Reader's per-key tag inheritance across
+// the fragments of one Segment, which is Reader behaviour rather than a property
+// of Metadata and is switched off by WithoutTagInheritance; ParseTimestamp for the
+// format the AWS timestamp tags are written in; MetadataComplete, the predicate
+// that says when a fragment's tags have all arrived; ClusterTime and the
+// wall-clock accessors, for a Cluster.Timestamp that counts from the UNIX EPOCH
+// rather than from the start of the stream -- read as elapsed media time it is
+// wrong by decades; and Reader.Next, which REPORTS the
+// in-band StreamError carried by AWS_KINESISVIDEO_ERROR_CODE /
+// AWS_KINESISVIDEO_ERROR_ID rather than merely making it available, so a stream
+// stopped by a KMS-key error cannot be read as a clean end of stream.
+//
+// Usage lives in go/README.md, "Amazon Kinesis Video Streams: the
+// integrations/kvs module"; go/integrations/doc.go gives the reason an
+// integration is a module of its own.
 package tags
 
 import (

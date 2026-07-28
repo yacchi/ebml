@@ -46,7 +46,31 @@
 // Tracks, Track, TrackByName, TimestampScale, ClusterTimestamp, BlockTime,
 // StartTime, EndTime, TrackPCM and TrackPCMByName.
 //
-// For an Amazon KVS GetMedia consumer, see go/integrations/kvs/examples/getmedia.
+// # Amazon Kinesis Video Streams
+//
+// A KVS GetMedia response is a stream of exactly the shape this package
+// assembles, and the conventions AWS layers on top of it are named in
+// github.com/yacchi/ebml/impl/go/integrations/kvs. That is a SEPARATE Go module:
+// requiring github.com/yacchi/ebml/impl/go does not make it resolvable, so a
+// consumer names it in its own go get. What it supplies, none of which this
+// package can state on its own:
+//
+//   - Metadata, the typed per-fragment view of the AWS tags, and ParseTimestamp
+//     for the format their timestamps are written in.
+//   - MetadataComplete, the KVS-specific WithMetadataComplete predicate, which
+//     releases a fragment as soon as its continuation token has arrived.
+//   - ClusterTime and the wall-clock reading of StartTime, EndTime and BlockTime,
+//     with the epoch basis a KVS Cluster.Timestamp actually uses -- which is why
+//     this package's own durations read as decades on such a stream.
+//   - Reader.Next, which REPORTS the in-band StreamError carried by
+//     AWS_KINESISVIDEO_ERROR_CODE / AWS_KINESISVIDEO_ERROR_ID rather than merely
+//     making it available, so a stream stopped by a KMS-key error cannot be read
+//     as a clean end of stream.
+//
+// Usage lives in go/README.md, "Amazon Kinesis Video Streams: the
+// integrations/kvs module", with a worked consumer in
+// go/integrations/kvs/examples/getmedia; go/integrations/doc.go gives the reason
+// an integration is a module of its own.
 package fragment
 
 import (
