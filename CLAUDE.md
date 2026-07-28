@@ -172,7 +172,7 @@ never turn the build red on its own, and reports drift against their `master`
 weekly without failing.
 
 Fixtures under `fixtures/**/*.ebml.hex` are commented hexadecimal and entirely
-synthetic; the corpus is 15 fixtures and models an unknown-size `Cluster`
+synthetic; the corpus is 19 fixtures and models an unknown-size `Cluster`
 throughout, each one described in `fixtures/kvs/README.json`. Golden files under `golden/**/*.jsonl` contain one JSON object per
 cursor operation, replayed under all split patterns from
 `tests/split_patterns.json`.

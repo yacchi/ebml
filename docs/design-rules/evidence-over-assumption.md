@@ -44,3 +44,29 @@ naming the same instant as its `PRODUCER_TIMESTAMP`. It declared 0 until that
 was found to model a timeline origin the field never sends — the same defect
 class as F5. The other fixtures keep a zero-based timeline on purpose, since
 Matroska fixes no origin and a file does start at zero.
+
+## A profile is not a variation, and the corpus separates them
+
+Round 4's appendix listed nine shapes confirmed against real captures. Splitting
+them by what they are is what kept the corpus readable.
+
+Some are properties of the Amazon Connect PROFILE, true of every capture: no
+`Audio` master under `TrackEntry`, `CodecID` `A_AAC` with `CodecPrivate` `0x1190`
+over 8 kHz 16-bit L16 PCM, `Info` carrying `Title` and
+`MuxingApp` = `WritingApp`, one tag group per `Tags` element, an epoch-based
+`Cluster.Timestamp`. Those belong in the Connect-shaped fixture path, not in
+fixtures of their own — a shape every capture has proves nothing extra when
+repeated.
+
+The rest are VARIATIONS a consumer must survive, each worth one fixture named for
+what it proves: `track_order_swapped`, `short_block_mid_track`, `tagless_tail`,
+`stream_reuse`.
+
+The generator therefore keeps TWO track shapes. A well-formed one, with an
+`Audio` master and a codec declaration that matches its payload, is what fixtures
+about scaling or unregistered elements are built from; the Connect profile is
+what Connect-shaped fixtures are built from. Degrading every fixture to the
+profile would have cost the corpus its well-formed cases, which is the same
+mistake as F5 pointing the other way: a corpus in which every fixture carries one
+vendor's defects can no longer show which behaviour is the vendor's and which is
+Matroska's.

@@ -191,6 +191,10 @@ var allFixtures = []string{
 	"tail_last_fragment",
 	"scaled_timestamps",
 	"unknown_elements",
+	"track_order_swapped",
+	"short_block_mid_track",
+	"tagless_tail",
+	"stream_reuse",
 }
 
 // project renders a Fragment as text: both retained trees node by node (identity,

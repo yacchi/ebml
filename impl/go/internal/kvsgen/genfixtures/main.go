@@ -45,7 +45,7 @@ func generateKVS(root string, log io.Writer) error {
 	fixtures := kvsgen.BuildAll()
 	manifest := map[string]any{
 		"generated_by": "go run ./internal/kvsgen/genfixtures",
-		"data_safety":  "100% synthetic: fake UUID ContactId/InstanceId, counter-pattern PCM, synthetic tokens. No real Amazon Connect capture data.",
+		"data_safety":  "100% synthetic: fake UUID ContactId/InstanceId, counter-pattern PCM, synthetic tokens, synthetic producer name and build string. No captured media, no real identifier of any contact, instance or stream, and no measurement of anyone's deployment. What the fixtures reproduce is the SHAPE the field produces -- which elements appear where, and which declarations contradict the payload -- never a value that identifies who produced it.",
 		"schema":       "each .ebml.hex is a synthetic MKV stream; each golden/kvs/<name>.jsonl is the cursor event log (KVS classifier) and is split-invariant.",
 		"fixtures":     map[string]kvsgen.Facts{},
 	}

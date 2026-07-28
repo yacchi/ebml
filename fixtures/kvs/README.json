@@ -1,8 +1,8 @@
 {
-  "data_safety": "100% synthetic: fake UUID ContactId/InstanceId, counter-pattern PCM, synthetic tokens. No real Amazon Connect capture data.",
+  "data_safety": "100% synthetic: fake UUID ContactId/InstanceId, counter-pattern PCM, synthetic tokens, synthetic producer name and build string. No captured media, no real identifier of any contact, instance or stream, and no measurement of anyone's deployment. What the fixtures reproduce is the SHAPE the field produces -- which elements appear where, and which declarations contradict the payload -- never a value that identifies who produced it.",
   "fixtures": {
     "connect_real_shape": {
-      "description": "Real Connect-shaped one-fragment layout with four blocks and four Segment Tags elements.",
+      "description": "Real Connect-shaped one-fragment layout: the whole profile, four blocks, four Segment Tags elements.",
       "fragments": 1,
       "segments": 1,
       "clusters": 1,
@@ -19,8 +19,8 @@
       "fragment_numbers": [
         "connect-real-0"
       ],
-      "bytes": 1202,
-      "notes": "Segment-level Tags appear both before and after the Cluster; AWS_KINESISVIDEO_MILLIS_BEHIND_NOW and AWS_KINESISVIDEO_CONTINUATION_TOKEN occur ONLY after it. The Cluster Timestamp is epoch-based (1000000000000 ticks of 1 ms), naming the same instant as PRODUCER_TIMESTAMP, so a consumer reading it as an elapsed media time is visibly wrong here."
+      "bytes": 1206,
+      "notes": "Segment-level Tags appear both before and after the Cluster; AWS_KINESISVIDEO_MILLIS_BEHIND_NOW and AWS_KINESISVIDEO_CONTINUATION_TOKEN occur ONLY after it. The Cluster Timestamp is epoch-based (1000000000000 ticks of 1 ms), naming the same instant as PRODUCER_TIMESTAMP, so a consumer reading it as an elapsed media time is visibly wrong here. Models the measured Connect profile: no Audio master under TrackEntry (a consumer reading SamplingFrequency/Channels/BitDepth from the track finds nothing and must take them from the MimeType tag), CodecID=A_AAC with CodecPrivate 0x1190 over L16 PCM (a consumer dispatching a decoder on CodecID decodes noise), and Info carrying Title plus MuxingApp = WritingApp. The AUDIO_*_CUSTOMER tag values are the constants 1 and 2 while Tracks numbers AUDIO_FROM_CUSTOMER first, so a consumer mapping direction from those tag values gets this capture backwards."
     },
     "false_ebml_magic_in_pcm": {
       "description": "SimpleBlock PCM embeds the EBML magic; must not mis-split.",
@@ -212,6 +212,57 @@
       "bytes": 603,
       "notes": "TimestampScale=100000; block timecodes -20/0/+20 around Cluster Timestamp 1000."
     },
+    "short_block_mid_track": {
+      "description": "64 ms / 1024-byte alternating blocks with one 192-byte block mid-track.",
+      "fragments": 1,
+      "segments": 1,
+      "clusters": 1,
+      "simple_blocks": 6,
+      "ebml_headers": 1,
+      "unknown_size_segment": true,
+      "known_size_cluster": false,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "producer_timestamps": [
+        "1000007200.000"
+      ],
+      "fragment_numbers": [
+        "short-block-0"
+      ],
+      "bytes": 6439,
+      "notes": "Models the measured 64 ms / 1024-byte alternating cadence together with the 192-byte block observed MID-TRACK in a real fragment. A consumer that derives a block's duration from a constant block size, or that reframes a track's PCM into fixed-size chunks, shifts every sample after the outlier; the fixture also gives the two tracks unequal byte counts within one Cluster, which a per-track buffer keyed to a single length cannot hold. The block TIMECODES stay on the 0/64/128 ms grid across the outlier, so the short block leaves a gap between its own 12 ms of PCM and the next block's start: the capture this models carries the same disagreement, and a fixture that renumbered the timecodes to close it would assert a producer behaviour nobody observed."
+    },
+    "stream_reuse": {
+      "description": "One reused stream: two contacts' runs five days apart, neither named by the stream.",
+      "fragments": 4,
+      "segments": 4,
+      "clusters": 4,
+      "simple_blocks": 8,
+      "ebml_headers": 4,
+      "unknown_size_segment": true,
+      "known_size_cluster": false,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000002",
+        "00000000-0000-4000-8000-000000000002",
+        "00000000-0000-4000-8000-000000000003",
+        "00000000-0000-4000-8000-000000000003"
+      ],
+      "producer_timestamps": [
+        "1000000000.000",
+        "1000000001.024",
+        "1000432000.000",
+        "1000432001.024"
+      ],
+      "fragment_numbers": [
+        "reuse-b-0",
+        "reuse-b-1",
+        "reuse-c-0",
+        "reuse-c-1"
+      ],
+      "bytes": 4564,
+      "notes": "Models the reuse of a KVS stream by a producer that does not open a new one per contact: ONE stream carries many separate contacts' runs, spread over a span far longer than any one of them, and the stream's NAME does not name the contact its first fragment belongs to. Here the stream is named for 00000000-0000-4000-8000-000000000001, which appears in no fragment, and the two runs it does hold are five days apart. A consumer that trusts the stream name, or that treats the first fragment it reads as the requested contact's, transcribes another contact's audio; only the per-fragment ContactId tag selects a contact. The stream NAME is not in the document and cannot be -- it is an API-level identifier with no Matroska field -- so the fixture carries only the half that is expressible in bytes: several contacts, days apart, in one stream. The name is recorded in the fixture's own header comment for legibility."
+    },
     "tagless_consecutive": {
       "description": "4 fragments; two consecutive middle fragments are tagless.",
       "fragments": 4,
@@ -269,6 +320,33 @@
       "bytes": 1223,
       "notes": "Middle fragment tagless; cursor still parses cleanly."
     },
+    "tagless_tail": {
+      "description": "3 fragments; the FINAL fragment is tagless and nothing follows it.",
+      "fragments": 3,
+      "segments": 3,
+      "clusters": 3,
+      "simple_blocks": 6,
+      "ebml_headers": 3,
+      "unknown_size_segment": true,
+      "known_size_cluster": false,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000001",
+        ""
+      ],
+      "producer_timestamps": [
+        "1000010800.000",
+        "1000010801.024",
+        "1000010802.048"
+      ],
+      "fragment_numbers": [
+        "tail-tagless-0",
+        "tail-tagless-1",
+        "tail-tagless-2"
+      ],
+      "bytes": 2641,
+      "notes": "Models the tagless fragment observed at the TAIL of a contact run, which tagless_single and tagless_consecutive do not cover because both keep theirs mid-stream. A consumer that attributes a tagless fragment by waiting for the next tagged one, or that flushes a contact only when a new ContactId appears, silently drops the last fragment of every contact; attribution must fall back to the preceding run and to end of stream."
+    },
     "tail_last_fragment": {
       "description": "Final fragment's Cluster observable before EOF; Segment closes at EOF.",
       "fragments": 2,
@@ -312,6 +390,27 @@
       ],
       "bytes": 703,
       "notes": "Cluster and Segment closure follow their declared size strategies."
+    },
+    "track_order_swapped": {
+      "description": "Connect profile with track 1 = AUDIO_TO_CUSTOMER: the reversed Tracks order.",
+      "fragments": 1,
+      "segments": 1,
+      "clusters": 1,
+      "simple_blocks": 3,
+      "ebml_headers": 1,
+      "unknown_size_segment": true,
+      "known_size_cluster": false,
+      "contact_ids": [
+        "00000000-0000-4000-8000-000000000002"
+      ],
+      "producer_timestamps": [
+        "1000003600.000"
+      ],
+      "fragment_numbers": [
+        "swapped-0"
+      ],
+      "bytes": 1179,
+      "notes": "Models the measured fact that Connect track order is NOT fixed: track 1 is AUDIO_TO_CUSTOMER here and AUDIO_FROM_CUSTOMER in connect_real_shape, with TrackUID following the name, while the AUDIO_*_CUSTOMER tag values are the constants 1 and 2 in both. A consumer that resolves the caller/agent channel from the track number, the TrackUID or those tag values transcribes one of the two fixtures with the two speakers swapped; only TrackEntry Name distinguishes them."
     },
     "two_tracks": {
       "description": "One Cluster carries blocks for both named audio tracks.",

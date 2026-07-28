@@ -188,19 +188,27 @@ func TestDumpClosesUnknownSizeCluster(t *testing.T) {
 	// elements of this fixture are Segment children -- two before the Cluster and
 	// two after it -- so none may appear at the deeper indent.
 	var segmentTags, clusterTags int
+	var clusterLine string
 	for _, line := range strings.Split(out.String(), "\n") {
 		switch {
 		case strings.HasPrefix(line, "  Tags ("):
 			segmentTags++
 		case strings.HasPrefix(line, "    Tags ("):
 			clusterTags++
+		case strings.HasPrefix(line, "  Cluster ("):
+			clusterLine = line
 		}
 	}
 	if segmentTags != 4 || clusterTags != 0 {
 		t.Errorf("Tags elements: %d as Segment children, %d as Cluster children; want 4 and 0\n%s",
 			segmentTags, clusterTags, out.String())
 	}
-	if !strings.Contains(out.String(), "Cluster (0x1F43B675) [offset 639, size unknown]") {
-		t.Errorf("dump did not report an unknown-size Cluster\n%s", out.String())
+	// What this asserts is the SIZE, not the offset. The offset is a byte position
+	// in a generated fixture, so pinning it here would fail this CLI test for any
+	// change to the Connect profile's Info or Tracks -- neither of which this test
+	// is about.
+	if !strings.HasPrefix(clusterLine, "  Cluster (0x1F43B675) [offset ") ||
+		!strings.HasSuffix(clusterLine, ", size unknown]") {
+		t.Errorf("dump did not report an unknown-size Cluster as a Segment child\n%s", out.String())
 	}
 }

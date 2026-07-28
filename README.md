@@ -216,7 +216,7 @@ bytes and producing the same traces.
 
 ### The fixtures
 
-Fifteen synthetic fixtures, modelling an unknown-size `Cluster` throughout
+Nineteen synthetic fixtures, modelling an unknown-size `Cluster` throughout
 because that is the shape a live stream sends: `topology_basic`,
 `tail_last_fragment`, `false_ebml_magic_in_pcm`, `multi_cluster`,
 `multi_segment`, `tagless_single`, `tagless_consecutive`, `filter_mismatch`,
@@ -225,8 +225,18 @@ partial `Tags` element missing its identity keys), `two_tracks` (one `Cluster`
 carrying `SimpleBlock`s for two named audio tracks), `known_size_cluster` (legal
 Matroska, but not what the field sends — the deliberate counter-case), and
 `connect_real_shape` (two `Tags` elements before the `Cluster` and two after,
-with an epoch-based `Cluster.Timestamp`). Every one is exercised across every
-split pattern.
+with an epoch-based `Cluster.Timestamp`, no `Audio` master under `TrackEntry`,
+and a `CodecID` that contradicts its own payload).
+
+Four more carry the variations a consumer has to survive rather than the profile
+itself: `track_order_swapped` (track 1 is the other channel, and the
+`AUDIO_*_CUSTOMER` tag values are constants either way, so only `Name` maps a
+direction), `short_block_mid_track` (64 ms / 1024-byte alternating blocks with
+one 192-byte block mid-track), `tagless_tail` (the tagless fragment at the END of
+a contact run, with nothing following to attribute it), and `stream_reuse` (one
+reused stream holding two contacts' runs days apart, named for a third).
+
+Every one is exercised across every split pattern.
 
 Fixtures never contain real capture data, and a fixture models the shape the
 field actually produces rather than the shape that is easiest to generate: a
