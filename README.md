@@ -29,10 +29,10 @@ that has not finished yet is an ordinary input rather than a special case.
 * **Write it back out.** Parse and re-marshal a retained document to
   BYTE-IDENTICAL output, down to each header's original size-VINT width.
 * **Verify and emit CRC-32**, explicitly, wherever the covered bytes were retained.
-* **Name every element.** The RFC 9559 registry covers 270 of the 273 elements the
-  official IETF CELLAR schemas declare, checked element by element against them,
-  with the three omissions deliberate and documented. Unknown elements stay
-  readable, and vendor elements can be registered.
+* **Name every element.** The RFC 9559 registry is checked element by element
+  against the official IETF CELLAR schemas — see [Specification parity](#specification-parity)
+  for what that comes to. Unknown elements stay readable, and vendor elements can
+  be registered.
 * **Tell errors apart.** Structural damage, a verdict about an element's content,
   and "need more data" are three different things; recovery from the first two is
   opt-in and per class.
@@ -176,6 +176,71 @@ Running it from a checkout instead of installing it is in
   inventoried rather than implied.
 * Not a KVS SDK. The Amazon-specific parts read bytes you already obtained; there
   is no service client and no AWS dependency.
+
+## Specification parity
+
+What the specifications define, and what this project does about each. Measured
+against IETF CELLAR `matroska-specification` at `f93ab02` and
+`ebml-specification` at `a4b3c4a` (`docType="matroska" version="4"`) on
+2026-07-29; the command that reproduces it, and the per-capability element
+counts, are in
+[`impl/go/README.md`](impl/go/README.md#measured-conformance).
+
+This is a statement about the PROJECT: `spec/SPEC.md` is what every
+implementation must meet, so parity is not per language. Where an implementation
+has not caught up, its row in [Implementations](#implementations) says so.
+
+### EBML — RFC 8794
+
+| Capability | State |
+| --- | --- |
+| Element ID and size VINTs, every legal width | **Yes.** Limits match the schema's `EBMLMaxIDLength`/`EBMLMaxSizeLength` range, checked. |
+| Unknown-size elements | **Yes**, and they are the case the library is built around rather than an edge. |
+| Non-minimal (padded) size VINTs | **Yes.** Preserved exactly on round trip; `Reserved(width)` emits them deliberately. |
+| EBML header, including `DocTypeExtension` | **Yes**, registered and readable. |
+| `Void` | **Yes**, as an opaque skippable leaf. Nothing rewrites or reclaims it. |
+| CRC-32 | **Yes**, explicit in both directions. Never implicit, and only where the covered bytes were retained. |
+| Acting on `DocType`/`DocTypeVersion` | **No.** Both are readable elements; nothing in the library consults them. |
+
+### Matroska — RFC 9559
+
+| Capability | State |
+| --- | --- |
+| Element registry | **270 of the 273** elements the schemas declare, **0 mismatches**, and **0** of the elements the schema still declares CURRENT are missing. The three absent are REMOVED after version 0 and stay unregistered on purpose. |
+| Containment and the unknown-size boundary rule | **Yes**, deny-only, from one policy that is never restated in a caller. |
+| `SimpleBlock` and `Block` framing | **Yes.** Track, timecode, flags and frames, with an exact inverse for writing. |
+| Lacing | **All four:** none, Xiph, fixed and EBML. |
+| Codec payloads inside a frame | **No, by design.** Frames are handed over as bytes; this is not a codec. |
+| `SeekHead` / `Cues` | Readable elements like any other. **No index is built and no seeking API exists.** |
+| `Tags`, target-aware | **Yes**, in one place, with no producer's meaning baked in. |
+| `Chapters`, `Attachments` | Registered and readable as elements. **No dedicated handling.** |
+
+### WebM
+
+| Capability | State |
+| --- | --- |
+| WebM-profile elements | **133 of 133** registered, so WebM documents read and write correctly. |
+| Profile enforcement | **No.** Nothing consults `DocType`, so a document claiming `webm` while using a Matroska-only element is read exactly as its bytes say and nobody is told. |
+
+### Schema-declared validation — none of it exists
+
+The schemas state more than identity and containment. For each of these the
+library makes no statement at all, which is why it is not a validator:
+
+| The schema declares | On how many elements | What it would take |
+| --- | --- | --- |
+| `maxOccurs` / `minOccurs` | 241 | cardinality validation |
+| `minver` | 113 | `DocTypeVersion` gating |
+| `default` | 77 | resolving an absent element to its default |
+| `range` | 71 | value-range validation |
+| `restriction`/`enum` | 29 | enumerated value names |
+| `length` | 12 | fixed payload-length validation |
+| `recurring` | 3 | the once-per-Segment rule |
+| the WebM profile marker | 133 | restricting a `webm` document to its subset |
+
+Each row is a capability to design before it can be checked, not a hole in the
+checking. The inventory is produced by the conformance checker itself, so a
+clean run can never be mistaken for full specification conformance.
 
 ## Implementations
 

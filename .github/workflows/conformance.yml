@@ -55,6 +55,13 @@ jobs:
             -schema ../../.spec-cache/ebml_matroska.xml \
             -missing | tee "$GITHUB_STEP_SUMMARY"
 
+      # The READMEs publish these counts. They are computed here and nowhere
+      # else, so this is the only job that can tell whether the prose still
+      # matches them -- the ordinary suite skips the check for want of the
+      # schemas, which are never vendored.
+      - name: Check the published parity tables against the schemas
+        run: go -C impl/go test ./internal/specconform/ -run Parity -count=1
+
   upstream-drift:
     name: upstream schema drift
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
