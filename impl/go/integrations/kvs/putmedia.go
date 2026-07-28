@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// ---- The PutMedia producer profile ----
+// ---- A PutMedia producer recipe ----
 //
 // Everything above reads a KVS stream. A producer WRITES one, through
 // go/writer, and the two ends do not want the same document shape. This is that
@@ -20,13 +20,13 @@ import (
 // A Segment has no locatable end while the stream is live, so it is unknown-size
 // on both sides and there is nothing to decide.
 //
-// The Cluster is the interesting one, and the reason is the SINK rather than the
-// format. PutMedia takes the document over a pipe, and a producer wants exactly
-// one contiguous write per fragment: writer.Buffered holds the Cluster's payload
-// and emits it whole at EndMaster, which is precisely that. An unknown-size
-// Cluster streams its children as they are written, so one fragment becomes many
-// writes to the pipe, and the reader's first-byte timing no longer means what the
-// producer thinks it means.
+// The Cluster is the interesting one, and the reason is the caller's buffering
+// policy rather than an AWS format requirement. writer.Buffered holds the
+// Cluster's payload and emits it whole at EndMaster, which is useful when the
+// caller deliberately wants one writer call per fragment. An unknown-size
+// Cluster streams its children as they are written and is valid PutMedia input
+// too. HTTP/TCP write boundaries do not define KVS fragments: PutMedia maps each
+// MKV Cluster to one fragment, independently of how many writes carried it.
 //
 // Producers in the field emit UNKNOWN-SIZE Clusters -- which is why the fixture
 // corpus models that shape throughout. Both are correct for their own purpose,
@@ -50,10 +50,11 @@ import (
 //   - ABSOLUTE: Cluster.Timestamp is a wall-clock instant, counted in
 //     TimestampScale ticks from the UNIX EPOCH. It is what the fixture corpus
 //     models and what ClusterTime reads back. Use ClusterTimestamp to build it.
-//   - RELATIVE: Cluster.Timestamp is measured from the START OF THE FRAGMENT, so
-//     the first Cluster of each fragment is at or near zero and the service adds
-//     the fragment's own producer timestamp on top. No helper is needed for it --
-//     the value is an elapsed duration in ticks, which the producer already has.
+//   - RELATIVE: Cluster.Timestamp is measured from the
+//     x-amzn-producer-start-timestamp of the PutMedia REQUEST. The service adds
+//     that request header to the fragment timecode. A request may carry several
+//     Clusters, so their timestamps continue to advance and MUST NOT reset to
+//     zero at each fragment. No helper is needed for the elapsed tick count.
 //
 // Reading a RELATIVE stream with the wall-clock accessors in this package yields
 // times near the Unix epoch, faithfully, because that is what the bytes say. The
@@ -76,6 +77,10 @@ const (
 // declares something else, and pass the SAME value it declares. A zero scale is
 // rejected rather than defaulted, because silently assuming a scale the document
 // does not state is how a timeline ends up off by a factor of a million.
+//
+// This function performs the Matroska time conversion only. It does not validate
+// the separate PutMedia service constraints on TimestampScale or on the document
+// that carries it.
 //
 // A time before the Unix epoch is rejected: Cluster.Timestamp is unsigned in
 // Matroska, so there is no encoding for it and truncating to zero would place the

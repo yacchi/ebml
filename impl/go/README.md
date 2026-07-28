@@ -819,20 +819,20 @@ exactly what the fragment carried.
 
 ### Writing a PutMedia producer
 
-The module names the producer profile as well, because a PutMedia producer and a
-real capture do not want the same document and the difference is not guessable:
+The module records one useful producer recipe as well. It is a buffering choice,
+not an AWS compatibility requirement:
 
-| | a real capture from the field | a PutMedia producer |
+| | a real capture from the field | this producer recipe |
 | --- | --- | --- |
 | `Segment` | unknown-size | unknown-size (same) |
 | `Cluster` | unknown-size | **known-size, `writer.Buffered()`** |
 
-The Cluster differs because of the SINK, not the format. PutMedia takes the
-document over a pipe and a producer wants one contiguous write per fragment,
-which is exactly what `Buffered()` emits at `EndMaster`; an unknown-size Cluster
-streams its children as they are written and turns one fragment into many writes.
-Both shapes are legal and this library reads either — the corpus models the
-unknown-size one throughout, because that is what the field sends.
+`Buffered()` emits a Cluster in one writer call at `EndMaster`, while an
+unknown-size Cluster streams its children as they are written. Both shapes are
+valid PutMedia input and this library reads either. HTTP/TCP write boundaries do
+not define fragments: PutMedia maps each MKV Cluster to one fragment. The corpus
+models unknown-size Clusters throughout because that is what the observed field
+producer sends.
 
 What `Cluster.Timestamp` MEANS is decided by the `x-amzn-fragment-timecode-type`
 header of the caller's own PutMedia request, so the module names both values and
@@ -846,10 +846,21 @@ ticks, err := kvs.ClusterTimestamp(time.Now(), scale)
 `kvs.ClusterTimestamp` is the inverse of `kvs.ClusterTime`: under
 `kvs.FragmentTimecodeTypeAbsolute` a Cluster timestamp counts from the UNIX
 EPOCH, not from the start of the stream. Under
-`kvs.FragmentTimecodeTypeRelative` it is an elapsed duration in ticks and no
-helper is needed. A document written under one convention and read under the
-other parses perfectly and means something else, which is why the choice is
-named here rather than left to a comment.
+`kvs.FragmentTimecodeTypeRelative` it is the elapsed duration in ticks from the
+`x-amzn-producer-start-timestamp` of that PutMedia request and no helper is
+needed. One request may carry several Clusters, so this value continues to
+advance and must not reset at each fragment. A document written under one
+convention and read under the other parses perfectly and means something else,
+which is why the choice is named here rather than left to a comment.
+
+This module does not validate the PutMedia service profile. In particular,
+`ClusterTimestamp` converts using the supplied Matroska `TimestampScale` but
+does not enforce the service's accepted scale range. The caller remains
+responsible for the single-Segment rule, fragment duration and size limits,
+track count and frame-to-track consistency, timestamp ordering, and streaming
+metadata limits. These constraints can change independently of this library;
+the current list belongs to the
+[PutMedia API reference](https://docs.aws.amazon.com/kinesisvideostreams/latest/APIReference/API_dataplane_PutMedia.html).
 
 There is deliberately no `kvs.FragmentWriter`: `writer` is the only encoder, and
 a type that composed its calls would be a wrapper hiding the two decisions above
