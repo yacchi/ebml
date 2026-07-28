@@ -65,6 +65,13 @@ whatever shape the standing rules do allow.
 A request that clears all three is accepted, and accepted requests are recorded
 here as well, so this ledger cannot be read as a record of saying no.
 
+The ledger starts partway through the project's life. Everything below "Declined
+earlier" was decided before this note existed and was recovered from the session
+records the work happened in, which are not part of this repository — so those
+entries are shorter, and their provenance is a record you cannot check from here.
+Each was re-checked against the code as it stands before being written down. New
+entries are added when the decision is made, not reconstructed afterwards.
+
 ## Declined
 
 ### One structured observation channel — `WithObserver(func(Observation))`
@@ -164,6 +171,63 @@ not of this library.
 What survives is the technique, which is worth writing down and is not an API. It
 is written down: [The writer, round-tripping, and CRC-32](writer-and-crc.md), "When
 byte equality does not hold, and how to compare then".
+
+## Declined earlier, and recorded nowhere else
+
+The entries above are this ledger's first round. The project had been declining
+things for as long as it had been built, and those declines were argued once and
+then kept only in the session records the work happened in — outside this
+repository, and so invisible to everyone who reads it. Recovered from those
+records and re-checked against the code as it stands; where a reason turned on an
+API, that API was verified to still behave the way the reason assumed.
+
+**A GetMedia wrapper over the AWS SDK, inside the KVS integration.** The scope
+rule that an integration holds no client is in
+[`impl/go/integrations/doc.go`](../../impl/go/integrations/doc.go); the reason
+recorded when it was decided is stronger and was never written down. A wrapper
+worth shipping has to handle reconnection and continuation tokens correctly, and
+writing that precisely amounts to publishing the operational know-how of running
+against the service. The library's job is to make that work possible; navigating
+the service's traps stays the consumer's. This was decided as a matter of scope
+and NOT of scheduling — it is not a deferred item and does not come back as "next
+work".
+
+**A notify or OnClose handler on `ext/scope`.** Declined for the reason F9 above
+was, years of decisions earlier: a finished scope is the RETURN VALUE of
+`Tracker.Observe`, which keeps the layer pull-shaped and matching
+`Assembler.Feed` returning completed fragments. That the same argument now
+answers a second request is the point of writing it down.
+
+**`parser.WithPayloadThreshold`.** A size below which payloads would be buffered
+eagerly. It reduces how often `NeedMoreData` is reported and cannot remove it
+from the contract, so the consumer still writes the same loop — and the media
+payloads that motivated it exceed any threshold worth setting.
+
+**`LeafNode.Payload` returning an owned copy.** It would simplify every layer
+above, and it costs a full media copy for the consumers that only look at bytes.
+It also weakens the measured one-allocation-per-event guarantee, which
+`Node`'s doc, `impl/go/README.md` and `spec/SPEC.md` section 3 state identically
+— a guarantee stated in three places is not quietly narrowed in one.
+
+**`parser.Detach(Node)`.** The one CONDITIONAL entry here. It is sound, and it is
+worth adding when a consumer needs a retainable node for its own sake; it was
+declined because `impl/go/stream` removed the ergonomic pressure that had
+motivated it. A request that brings back an actual need, rather than the
+ergonomics, is a different request.
+
+**`parser.WithByteTap`.** A byte tap to enable streaming CRC-32 verification. It
+is element-agnostic, so it breaks no rule — it was declined as unproven core
+surface, and because a consumer that correctly skipped a subtree has nothing to
+verify. See [The writer, round-tripping, and CRC-32](writer-and-crc.md) for what
+checksum verification does instead.
+
+**`WithEagerEmit` on `ext/fragment`.** A predicate that returns true at the
+Cluster's own end IS eager emit, so `WithMetadataComplete` already covers both
+escapes and a second option would only give one of them a name.
+
+**`WithSalvageTruncatedTail`.** Declined because it would be an option that
+changes no error's behaviour: the salvage is the default and nothing turns it off
+([Errors, recovery, and delivery](errors-and-recovery.md)).
 
 ## Accepted
 
