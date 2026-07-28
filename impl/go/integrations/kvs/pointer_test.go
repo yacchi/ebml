@@ -29,33 +29,33 @@ func TestNamesTheCorePackageDocsPointAt(t *testing.T) {
 	// ext/fragment: "Metadata, the typed per-fragment view of the AWS tags, and
 	// ParseTimestamp for the format their timestamps are written in."
 	var m kvs.Metadata
-	var _ string = m.FragmentNumber
-	var _ string = m.ContinuationToken
-	var _ time.Time = m.ProducerTimestamp
-	var _ time.Time = m.ServerTimestamp
-	var _ time.Duration = m.MillisBehindNow
-	var _ map[string]string = m.Tags
-	var _ func() error = m.Err
-	var _ func(string) (time.Time, error) = kvs.ParseTimestamp
+	pinType[string](m.FragmentNumber)
+	pinType[string](m.ContinuationToken)
+	pinType[time.Time](m.ProducerTimestamp)
+	pinType[time.Time](m.ServerTimestamp)
+	pinType[time.Duration](m.MillisBehindNow)
+	pinType[map[string]string](m.Tags)
+	pinType[func() error](m.Err)
+	pinType[func(string) (time.Time, error)](kvs.ParseTimestamp)
 
 	// ext/fragment: "MetadataComplete, the KVS-specific WithMetadataComplete
 	// predicate". The conversion is the claim: it must remain assignable to the
 	// option the core package takes.
-	var complete func(*fragment.Fragment, parser.ElementID) bool = kvs.MetadataComplete
-	var _ fragment.Option = fragment.WithMetadataComplete(complete)
+	pinType[func(*fragment.Fragment, parser.ElementID) bool](kvs.MetadataComplete)
+	pinType[fragment.Option](fragment.WithMetadataComplete(kvs.MetadataComplete))
 
 	// ext/fragment: "ClusterTime and the wall-clock reading of StartTime, EndTime
 	// and BlockTime, with the epoch basis a KVS Cluster.Timestamp actually uses."
-	var _ func(*fragment.Fragment) time.Time = kvs.ClusterTime
-	var _ func(*fragment.Fragment) time.Time = kvs.StartTime
-	var _ func(*fragment.Fragment) time.Time = kvs.EndTime
-	var _ func(*fragment.Fragment, *parser.SimpleBlock) time.Time = kvs.BlockTime
+	pinType[func(*fragment.Fragment) time.Time](kvs.ClusterTime)
+	pinType[func(*fragment.Fragment) time.Time](kvs.StartTime)
+	pinType[func(*fragment.Fragment) time.Time](kvs.EndTime)
+	pinType[func(*fragment.Fragment, *parser.SimpleBlock) time.Time](kvs.BlockTime)
 
 	// ext/fragment and ext/tags: "Reader.Next, which REPORTS the in-band
 	// StreamError carried by AWS_KINESISVIDEO_ERROR_CODE / _ERROR_ID."
 	r := kvs.NewReader(strings.NewReader(""))
-	var _ func() (*fragment.Fragment, kvs.Metadata, error) = r.Next
-	var _ error = &kvs.StreamError{}
+	pinType[func() (*fragment.Fragment, kvs.Metadata, error)](r.Next)
+	pinType[error](&kvs.StreamError{})
 	if kvs.TagErrorCode != "AWS_KINESISVIDEO_ERROR_CODE" || kvs.TagErrorID != "AWS_KINESISVIDEO_ERROR_ID" {
 		t.Errorf("the error tag names the core package docs spell out have changed: %q / %q",
 			kvs.TagErrorCode, kvs.TagErrorID)
@@ -63,7 +63,7 @@ func TestNamesTheCorePackageDocsPointAt(t *testing.T) {
 
 	// ext/tags: "Reader's per-key tag inheritance ... switched off by
 	// WithoutTagInheritance."
-	var _ kvs.Option = kvs.WithoutTagInheritance()
+	pinType[kvs.Option](kvs.WithoutTagInheritance())
 
 	// The empty input is a clean end of stream, which keeps this test about the
 	// names rather than about behaviour.
@@ -71,3 +71,10 @@ func TestNamesTheCorePackageDocsPointAt(t *testing.T) {
 		t.Fatalf("Next on empty input = %v, want io.EOF", err)
 	}
 }
+
+// pinType fails to COMPILE when its argument is not assignable to T, which is
+// the whole of what this file asserts. It replaces the `var _ T = x` spelling of
+// the same assertion: staticcheck reads that as a redundant type declaration
+// (QF1011) precisely because the compiler can infer what the line exists to
+// state, so the assertion is moved somewhere the type is load-bearing.
+func pinType[T any](T) {}
