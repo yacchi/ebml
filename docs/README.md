@@ -19,6 +19,10 @@ under [`design-rules/`](design-rules/) hold the argument behind each one: the
 alternatives that were rejected, and the defect that produced the rule. Read the
 note before changing the rule it explains.
 
+* [Declined additions](design-rules/declined-additions.md) — why the small
+  cross-section is the product rather than an unfinished state, the three
+  questions every proposed API faces, and the ledger of what was asked for,
+  refused, and accepted. Read this before adding an exported name.
 * [Layer boundaries](design-rules/layer-boundaries.md) — repository layout, the
   module path, what makes a package core, `ext` leaves, integrations, retention.
 * [Pull shape and node lifetime](design-rules/pull-and-lifetime.md) — the single

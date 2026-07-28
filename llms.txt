@@ -1,0 +1,71 @@
+# ebml
+
+> A streaming, cursor-based EBML/Matroska library. An element is reported the
+> moment its header arrives and the caller decides on that header whether the
+> payload is worth reading, so a live stream is an ordinary input rather than a
+> special case. Implementations live under `impl/`, one directory per language;
+> `spec/SPEC.md` is the contract they share.
+
+This file indexes the documents an assistant should read before answering about
+this project or writing code against it. It states nothing itself: every fact
+lives in exactly one of the files below, and duplicating one here is how the
+copies drift apart.
+
+## Before proposing or adding an API
+
+- [Declined additions](docs/design-rules/declined-additions.md): why the small
+  cross-section IS the product, the three questions every proposed addition
+  faces, and the ledger of what has been asked for, refused and accepted. The
+  room to add convenient API here is large and deliberately unused — read this
+  before concluding that a missing helper is an oversight.
+- [CLAUDE.md](CLAUDE.md): every standing rule in one line each, with a link to
+  the note that argues it. The rules are the summary; the notes are the reasons.
+
+## The contract
+
+- [spec/SPEC.md](spec/SPEC.md): the normative, language-neutral portable
+  contract. Where a design note and this document disagree, this one wins.
+- [Pull shape across languages](docs/pull-shape-across-languages.md): why a
+  caller-fed cursor keeps an explicit `Next` while a source-owning driver is an
+  iterator, worked through Go, Rust, Python, JavaScript, Java, C# and C. Read
+  before porting the reading surface.
+
+## Design notes (not normative)
+
+- [Index of all notes](docs/README.md)
+- [Layer boundaries](docs/design-rules/layer-boundaries.md): layout, module
+  path, what is core, `ext` leaves, integrations, retention.
+- [Pull shape and node lifetime](docs/design-rules/pull-and-lifetime.md): one
+  reading surface, the enforced node lifetime, where an iterator is allowed.
+- [Errors, recovery, and delivery](docs/design-rules/errors-and-recovery.md):
+  the two error classes, per-class recovery, the salvaged truncated tail,
+  in-band failures.
+- [The writer, round-tripping, and CRC-32](docs/design-rules/writer-and-crc.md):
+  one encoder, byte-identical round-trip, explicit CRC.
+- [Registry, boundary policy, schemas](docs/design-rules/registry-and-schemas.md):
+  where element knowledge lives, the deny-only boundary rule, the CC-BY schemas.
+- [Evidence over assumption](docs/design-rules/evidence-over-assumption.md): why
+  a fixture or example models the shape the field produces.
+
+## Using the library
+
+- [README.md](README.md): what the library is, the implementation table, the
+  `ebml` command, and what every implementation shares. Language-neutral.
+- [impl/go/README.md](impl/go/README.md): the WHOLE of the Go library
+  documentation — package map, dependency direction, entry-point selection,
+  usage, writing. Go usage has exactly one home and this is it.
+
+## Amazon Kinesis Video Streams
+
+- [impl/go/integrations/kvs](impl/go/integrations/kvs): a SEPARATE Go module
+  (`github.com/yacchi/ebml/impl/go/integrations/kvs`). Requiring
+  `github.com/yacchi/ebml/impl/go` does not make it resolvable — it needs its
+  own `go get`. It supplies the typed per-fragment `Metadata`, `ParseTimestamp`,
+  `MetadataComplete`, the wall-clock accessors for a `Cluster.Timestamp` that
+  counts from the Unix epoch rather than from the start of the stream, and a
+  `Reader.Next` that REPORTS the in-band failure GetMedia states as
+  `AWS_KINESISVIDEO_ERROR_CODE`. A consumer who reimplements these by hand
+  usually misses that last one, and then a stream stopped by a KMS-key error
+  reads as a clean end of stream.
+- [impl/go/integrations/kvs/examples/getmedia](impl/go/integrations/kvs/examples/getmedia):
+  a runnable end-to-end consumer.

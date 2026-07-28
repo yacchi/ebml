@@ -19,6 +19,7 @@ these notes started.
 
 | Note | Covers |
 | --- | --- |
+| [Declined additions](docs/design-rules/declined-additions.md) | why the small cross-section IS the product, the three questions every proposed API faces, and the ledger of what was asked for and refused |
 | [Layer boundaries](docs/design-rules/layer-boundaries.md) | repository layout, module path, core vs `ext` vs `integrations`, forbidden imports, retention |
 | [Pull shape and node lifetime](docs/design-rules/pull-and-lifetime.md) | the single pull surface, node staleness, where the iterator is allowed |
 | [Errors and recovery](docs/design-rules/errors-and-recovery.md) | the two error classes, per-class recovery options, truncated tail, in-band failures, delivery timing |
@@ -31,6 +32,18 @@ normative, and a note that contradicts the specification is the thing that is
 wrong.
 
 ## Standing rules
+
+What is NOT added — [details](docs/design-rules/declined-additions.md):
+
+* THE CROSS-SECTION IS THE PRODUCT. The room to add convenient API here is large;
+  keeping it unused is a feature and not an oversight.
+* Every proposed addition faces three questions, and ANY of them declines it:
+  can the asker BUILD IT on the exported surface today; is it a SECOND SPELLING
+  of a fact an existing surface delivers; does its SHAPE reintroduce something a
+  rule removed. A real, well-evidenced need is answered in a shape that passes,
+  never by relaxing one of these.
+* A DECLINE IS RECORDED in that note, with the ask, the verdict and what to do
+  instead — so it is decided once. An ACCEPTANCE is recorded there too.
 
 Layout and layering — [details](docs/design-rules/layer-boundaries.md):
 
