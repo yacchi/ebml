@@ -54,9 +54,11 @@ const (
 // token arrives a few hundred bytes after the Cluster it belongs to.
 //
 // WHAT THIS RESTS ON. The continuation token is written by the SERVICE rather
-// than by a producer, and in every stream measured -- Amazon Connect as producer,
-// 112 fragments across several captures, no exceptions -- it was the last tag of
-// its document. That the same holds for every producer is an inference from where
+// than by a producer, and across every capture examined -- 112 fragments, one
+// producer, no exceptions -- it was the last tag of its document. Which producer
+// is not recorded here: it identifies somebody's deployment and changes nothing
+// about the inference, which turns on the token coming from the service at all.
+// That the same holds for every producer is an inference from where
 // the tag comes from, not something this library has observed. The predicate is
 // safe under that uncertainty because it is one-directional: an input whose token
 // arrives before some other Tags element simply does not release early, and falls

@@ -161,7 +161,9 @@ parsed-representation comparison is required by the ASKER'S corpus — real
 captures the writer cannot byte-reproduce — which is a property of their input,
 not of this library.
 
-What survives is the technique, which is worth writing down and is not an API.
+What survives is the technique, which is worth writing down and is not an API. It
+is written down: [The writer, round-tripping, and CRC-32](writer-and-crc.md), "When
+byte equality does not hold, and how to compare then".
 
 ## Accepted
 

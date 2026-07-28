@@ -42,6 +42,37 @@ internals are a payload layout inside one binary leaf, which is why the pair
 takes and returns bytes and never an element ID, and the element around it is
 still written by `impl/go/writer`.
 
+## When byte equality does not hold, and how to compare then
+
+The byte-identical guarantee above is about THIS repository's fixtures, which the
+writer produced. A consumer round-tripping a capture it did not produce usually
+cannot get byte equality, and that is not a defect on either side:
+
+* a SERVICE may add elements a producer never wrote, so re-emitting a producer's
+  output legitimately yields a shorter document than the one that was read;
+* a size VINT has legal non-minimal widths, so two encoders can disagree on
+  bytes while agreeing on every element.
+
+For such an input the useful comparison is between the two PARSED
+representations, and the discipline that makes it worth anything is this: where
+the two differ for a real reason, ASSERT THE DIFFERENCE EXPLICITLY rather than
+excluding the field. An exclusion list is where shape bugs hide — a field dropped
+from comparison because it was noisy once stops being checked forever, and the
+next drift in it is invisible. An asserted difference fails when the reason for
+it stops being true, which is the whole point.
+
+This is a technique and deliberately NOT an API. A helper here would have to take
+the non-preserved fields as a parameter, which is an exclusion list shipped and
+blessed by the library that should be the thing under test — a list each consumer
+writes is one it revisits, and a default nobody revisits is worse than none. The
+request, and the argument, are in
+[Declined additions](declined-additions.md).
+
+Nothing about it is needed to catch writer/reader drift in this repository. The
+corpus is regenerated in CI and any diff fails the build, so the stricter check
+already runs on every commit; the parsed comparison exists for inputs the writer
+cannot reproduce, which the corpus by construction never contains.
+
 ## CRC-32 is explicit on both sides and implicit on neither
 
 Verification happens only when a caller asks for it,

@@ -31,7 +31,8 @@ note before changing the rule it explains.
   error classes, per-class recovery, the salvaged truncated tail, in-band
   failures, when a Fragment is delivered.
 * [The writer, round-tripping, and CRC-32](design-rules/writer-and-crc.md) — one
-  encoder, no element knowledge in it, byte-identical round-trip, explicit CRC.
+  encoder, no element knowledge in it, byte-identical round-trip, how to compare
+  when byte equality legitimately does not hold, explicit CRC.
 * [The registry, boundary policy, and the official schemas](design-rules/registry-and-schemas.md)
   — where element knowledge lives, the deny-only unknown-size boundary rule, why
   the CC-BY schemas are never vendored.
