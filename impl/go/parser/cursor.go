@@ -240,7 +240,66 @@ type LeafNode struct{ nodeExtent }
 // master that is still open. That is the property this library exists for: a KVS
 // Cluster's end is observable without waiting for its Segment, so the last
 // fragment of a live stream need not wait for the connection to close.
-type EndNode struct{ nodeExtent }
+//
+// WHY it ended is a separate question from WHERE, and Reason answers it.
+type EndNode struct {
+	nodeExtent
+	reason CloseReason
+}
+
+// CloseReason names why a master ended. The extent alone cannot say: an
+// unknown-size master closed by the boundary rule and one closed by the end of the
+// input produce the same EndNode otherwise, and they mean different things to a
+// consumer -- the first is an ordinary structural close, the second is the stream
+// running out with that master still open.
+//
+// The three values are exhaustive because the cursor has exactly three ways to
+// close a master, and a fourth would be a change to Cursor rather than a value a
+// stream can produce.
+type CloseReason uint8
+
+const (
+	// ClosedByDeclaredEnd is a known-size master whose declared payload has been
+	// consumed. It is the ordinary close and the zero value.
+	ClosedByDeclaredEnd CloseReason = iota
+	// ClosedByBoundary is an unknown-size master ended by the consumer's boundary
+	// rule, because the header of an element that cannot be its child arrived.
+	// That element is not consumed by the close: the next Next reports it, at the
+	// enclosing depth. See Cursor.WithBoundary.
+	ClosedByBoundary
+	// ClosedByEndOfInput is a master still open when Finalize declared the input
+	// over. Every master open at that point closes this way, outermost last. It
+	// says nothing about whether the tail was truncated -- an unknown-size Segment
+	// closing here is the normal end of a complete live stream -- so a consumer
+	// asking whether bytes were lost reads the error, not this.
+	ClosedByEndOfInput
+)
+
+func (r CloseReason) String() string {
+	switch r {
+	case ClosedByDeclaredEnd:
+		return "declared end"
+	case ClosedByBoundary:
+		return "boundary"
+	case ClosedByEndOfInput:
+		return "end of input"
+	}
+	return fmt.Sprintf("CloseReason(%d)", uint8(r))
+}
+
+// Reason reports why the master ended: its declared end was reached, the boundary
+// rule closed it, or the input ended with it still open.
+//
+// It is the one thing about a close that a consumer cannot derive for itself. Which
+// of the two unknown-size closes happened is decided by the boundary rule, so
+// re-deriving it means restating that rule in the caller -- the duplication
+// matroska.StreamBoundary exists to prevent.
+//
+// It panics on a stale node, like every other node method; see Node.
+func (n *EndNode) Reason() CloseReason {
+	n.fresh("Reason")
+	return n.reason
+}
 
 // Descend enters the master, so its children are reported by the following Next
 // calls. It is the DEFAULT: a MasterNode nobody decided on is descended into, and
@@ -666,7 +725,7 @@ func (c *Cursor) advance() (Node, error) {
 		if err := c.p.LeaveMaster(); err != nil {
 			return nil, c.fail(err)
 		}
-		return c.endEvent()
+		return c.endEvent(ClosedByDeclaredEnd)
 	}
 
 	// An unknown-size master has no declared end, so only the consumer's boundary
@@ -678,7 +737,7 @@ func (c *Cursor) advance() (Node, error) {
 			if err := c.p.CloseMaster(); err != nil {
 				return nil, c.fail(err)
 			}
-			return c.endEvent()
+			return c.endEvent(ClosedByBoundary)
 		}
 	}
 
@@ -722,13 +781,13 @@ func (c *Cursor) issueLeaf(h ElementHeader) Node {
 // issueEnd reports the innermost open master as closed at the current offset. The
 // parser has already popped it; this pops the cursor's own record of it. It returns
 // the concrete *EndNode so that the EOF path can correct the end offset it computed.
-func (c *Cursor) issueEnd() (*EndNode, error) {
+func (c *Cursor) issueEnd(reason CloseReason) (*EndNode, error) {
 	if len(c.open) == 0 {
 		return nil, c.fail(Invalid{Msg: "master end reached with no open master"})
 	}
 	om := c.open[len(c.open)-1]
 	c.open = c.open[:len(c.open)-1]
-	n := &EndNode{}
+	n := &EndNode{reason: reason}
 	// The kind of the OBSERVATION, not of the element: the master itself was
 	// classified KindMaster, and what an EndNode reports is that it just ended.
 	n.set(c, om.id, KindEndMaster, len(c.open), om.offset, om.headerLen, om.size, c.p.Offset())
@@ -737,8 +796,8 @@ func (c *Cursor) issueEnd() (*EndNode, error) {
 
 // endEvent is issueEnd as an event, keeping the failure a nil Node rather than a
 // non-nil interface holding a nil *EndNode.
-func (c *Cursor) endEvent() (Node, error) {
-	n, err := c.issueEnd()
+func (c *Cursor) endEvent(reason CloseReason) (Node, error) {
+	n, err := c.issueEnd(reason)
 	if err != nil {
 		return nil, err
 	}
@@ -759,7 +818,7 @@ func (c *Cursor) dequeueClose() (n Node, err error, ok bool) {
 	if got := c.open[len(c.open)-1].id; got != cm.ID {
 		return nil, c.fail(Invalid{Msg: fmt.Sprintf("master stack mismatch at EOF: closing %s, cursor holds %s", cm.ID, got)}), true
 	}
-	end, err := c.issueEnd()
+	end, err := c.issueEnd(ClosedByEndOfInput)
 	if err != nil {
 		return nil, err, true
 	}

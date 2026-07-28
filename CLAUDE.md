@@ -84,6 +84,9 @@ Reading surface — [details](docs/design-rules/pull-and-lifetime.md):
   buys it — never reintroduce instance reuse.
 * `LeafNode.Payload` is a VIEW valid until the next `Next`; a retaining consumer
   copies.
+* `EndNode.Reason` names WHY a master closed — declared end, boundary, or end of
+  input, EXHAUSTIVE. A missing fact goes on the event that already reports it;
+  never open a channel for one.
 * `parser.Cursor` offers NO iterator and never will; `impl/go/stream` is the one
   layer where the iterator is exact, and its whole reading surface is
   `Nodes() iter.Seq2[parser.Node, error]` with no exported `Next`.

@@ -200,7 +200,9 @@ func scan(chunks [][]byte) error {
 				}
 			}
 		case *parser.EndNode:
-			fmt.Println("end", n.ID(), "at", n.End()) // its extent is settled
+			// Its extent is settled, and Reason says which of the three ways it
+			// closed: ClosedByDeclaredEnd, ClosedByBoundary, or ClosedByEndOfInput.
+			fmt.Println("end", n.ID(), "at", n.End(), "by", n.Reason())
 		}
 	}
 }
@@ -209,6 +211,14 @@ func main() {
 	_ = scan(nil)
 }
 ```
+
+An `*parser.EndNode` also says WHY the master closed, which its extent cannot:
+`ClosedByDeclaredEnd` is a known-size master reaching its declared end,
+`ClosedByBoundary` is the boundary rule ending an unknown-size master on an element
+that cannot be its child, and `ClosedByEndOfInput` is a master still open when
+`Finalize` declared the input over. The last one is **not** a truncation verdict —
+a complete live stream whose Segment is unknown-size ends exactly that way, and
+whether bytes were lost is `parser.TruncatedError`'s question.
 
 `Next` reports three outcomes a consumer must tell apart: `NeedMoreData` (feed the
 next chunk, or `Finalize` when the input is over), `io.EOF` (the stream ended

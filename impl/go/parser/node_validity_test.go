@@ -50,7 +50,7 @@ var nodeVariants = []struct {
 var wantNodeMethods = map[string][]string{
 	"MasterNode": {"Depth", "Descend", "End", "HeaderLen", "ID", "Kind", "Offset", "Size", "Skip"},
 	"LeafNode":   {"Depth", "End", "HeaderLen", "ID", "Kind", "Offset", "Payload", "Size", "Skip"},
-	"EndNode":    {"Depth", "End", "HeaderLen", "ID", "Kind", "Offset", "Size", "Start"},
+	"EndNode":    {"Depth", "End", "HeaderLen", "ID", "Kind", "Offset", "Reason", "Size", "Start"},
 }
 
 // advanceTo pulls events from a fully fed cursor until it reports one of variant T.

@@ -123,11 +123,20 @@ THE CALLBACK COUNT DOES NOT GROW. Two options answer the two error classes, and
 [errors-and-recovery.md](errors-and-recovery.md) requires a third class before a
 third option, which is a much higher bar than a third concern.
 
-One item was separated out rather than declined: whether an unknown-size master
-was closed by its declared end, by `matroska.StreamBoundary`, or by end of
-input, is genuinely not readable today — `parser.EndNode` reports the extent and
-not the reason. That is a missing fact on an EXISTING event, so if it is added
-it is added as a field on `EndNode`, which grows no callback.
+One item was separated out rather than declined, and then accepted: whether a
+master was closed by its declared end, by the boundary rule, or by end of input
+was genuinely not readable — `parser.EndNode` reported the extent and not the
+reason. It passed all three questions where the channel failed them. A consumer
+cannot derive it (telling the two unknown-size closes apart means restating the
+boundary rule in the caller, which `matroska.StreamBoundary` exists to prevent);
+it is no second spelling, since nothing delivered it; and its shape is a field on
+the event that already reports the close, so no callback grows and nothing is read
+out of a message. It shipped as `EndNode.Reason`, in `spec/SPEC.md` section 3.
+
+That is the pattern, and it is the useful half of this entry: a missing fact
+belongs on the event that already reports the thing it is about. A fact with no
+event of its own is a reason to ask which event should carry it, never a reason to
+open a channel.
 
 ### An exported round-trip structural comparison helper
 

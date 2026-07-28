@@ -112,3 +112,35 @@ master, or a known-size master already at its declared end, and rejects a
 known-size master with payload outstanding (`PrematureCloseError`); a known-size
 boundary belongs to the stream and must not be discarded. `LeaveMaster` remains
 the ordinary close at a declared end.
+
+## A master end says why, and that is a field rather than a channel
+
+`EndNode.Reason` reports which of the three ways a master closed: its declared end
+was reached, the boundary rule ended it, or the input ran out with it still open.
+The three are exhaustive because the cursor has exactly three places that close
+one, all of them reaching `issueEnd`; a fourth would be a change to `Cursor`
+rather than something a stream can produce.
+
+It exists because the extent cannot state it. An unknown-size master closed by the
+boundary rule and one closed at end of input are otherwise the same event, and a
+consumer cannot tell them apart for itself without restating the boundary rule in
+its own code — the duplication `matroska.StreamBoundary` exists to prevent
+([Registry, boundary policy, schemas](registry-and-schemas.md)). It is normative:
+`spec/SPEC.md` section 3 carries it, so a port reproduces it.
+
+WHAT IT IS NOT is the more useful half. It was asked for as one member of a
+`WithObserver(func(Observation))` channel carrying a stable code for every anomaly
+a reader can see, and that channel was declined
+([Declined additions](declined-additions.md)). This item survived the decline
+precisely because it is the opposite shape: a fact the pull surface was already
+delivering an event for, added to that event, changing no callback and adding no
+second way to learn anything. That is the pattern for the next such request — a
+missing fact belongs on the event that already reports the thing it is about, and
+a fact with no event of its own is a reason to ask which event should carry it,
+never a reason to open a channel.
+
+`ClosedByEndOfInput` is deliberately not a truncation verdict: a complete live
+stream whose outermost master is unknown-size ends exactly that way. Whether bytes
+were lost is `TruncatedError`'s question
+([Errors, recovery, and delivery](errors-and-recovery.md)), and keeping the two
+apart is why the reason names a mechanism rather than a judgement.

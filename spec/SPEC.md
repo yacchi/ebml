@@ -287,6 +287,30 @@ declared size, and the concrete offset at which it closed. For a known-size mast
 this is observable immediately when its declared payload bytes have been consumed,
 regardless of any enclosing unknown-size master.
 
+It must also carry **why** it closed, which is one of exactly three values:
+
+| Close reason | When |
+| --- | --- |
+| declared end | A known-size master whose declared payload has been consumed |
+| boundary | An unknown-size master ended by the consumer's boundary rule of section 6, on the header of an element that cannot be its child |
+| end of input | A master still open when the consumer declared the input over |
+
+The extent cannot state it: an unknown-size master closed by the boundary rule and
+one closed by the end of the input are otherwise identical events, and they mean
+different things — the first is an ordinary structural close, the second is the
+input running out with that master still open. Only the reader knows which
+happened, because only the reader applied the boundary rule; a consumer
+re-deriving it would have to restate that rule, and a boundary rule stated twice
+is the corruption section 1's "Unknown size" warns about — a false boundary
+corrupts the parse.
+
+The end-of-input reason is **not** a truncation verdict. A complete live stream
+whose outermost master is unknown-size ends exactly this way, so whether bytes
+were lost is answered by the errors of section 8 and never by this value.
+
+The three are exhaustive for the contract: an implementation offering a fourth way
+to close a master has extended the cursor, not observed a stream.
+
 The enclosing-master chain is deliberately **not** part of an event: a pull
 consumer that needs ancestry maintains it in its own loop, pushing on a descended
 master and popping on its end, which the depth on every event makes verifiable.
