@@ -144,3 +144,27 @@ stream whose outermost master is unknown-size ends exactly that way. Whether byt
 were lost is `TruncatedError`'s question
 ([Errors, recovery, and delivery](errors-and-recovery.md)), and keeping the two
 apart is why the reason names a mechanism rather than a judgement.
+
+## Whatever starts a pull coroutine publishes the way to release it
+
+Turning an `iter.Seq2` back into a `Next` means `iter.Pull2`, and `iter.Pull2`
+starts a coroutine the caller must stop. A type that starts one and exports only
+`Next` has made the resource UNRELEASABLE BY CONSTRUCTION, not merely awkward to
+release: the `stop` closure is unexported, the coroutine is parked in the
+iterator's `yield` rather than in a `Read`, and so nothing the caller can do to
+the byte source reaches it. So the rule is the narrow one — whatever starts the
+coroutine owns releasing it, and must publish a way to do so.
+
+`integrations/kvs.Reader` is the only place in this repository that starts one,
+and it exports `Close`. The layers below do not need the rule and must not grow a
+method for it: `ext/fragment.Reader` runs no goroutine, and its `Fragments()` is a
+plain `iter.Seq2` that returns on `!yield` like any other.
+
+The trap is that "iterate to completion" is a reasonable reading of a type whose
+only method is `Next`, and consumers of a STREAM will routinely not. Every normal
+termination of a live read is an early stop, so the early stop is the case the API
+must cover, not the exception. `Close` is scoped accordingly: it releases the
+coroutine, it does not touch the caller's source, and it does not discard a
+latched failure — an exhausted reader that reported an error keeps reporting it,
+because [a documented guarantee is never weakened](errors-and-recovery.md) by a
+method added beside it.

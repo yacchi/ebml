@@ -60,6 +60,10 @@ type Reader struct {
 // GetMediaForFragmentList returns for a fragment list: nothing here assumes the
 // input continues, and the end of the input closes the document that was open,
 // exactly as the end of a live capture does. Only the source differs.
+//
+// THE RETURNED READER OWNS A COROUTINE, so a caller that may stop reading before
+// Next reports EOF or an error defers Close. On a live GetMedia stream that is
+// the normal termination and not an exotic path.
 func NewReader(r io.Reader, opts ...Option) *Reader {
 	// A zero bufferSize means "unset": NewReaderSize supplies the default, so the
 	// number lives in exactly one place.
@@ -113,11 +117,15 @@ func NewReader(r io.Reader, opts ...Option) *Reader {
 // caller only the bytes that never arrived. Once reported the error is sticky.
 func (r *Reader) Next() (*fragment.Fragment, Metadata, error) {
 	var zero Metadata
-	if r.returnedEOF {
-		return nil, zero, io.EOF
-	}
+	// The sticky error is checked FIRST because Close also exhausts the Reader:
+	// a caller that latched a failure and then deferred Close must keep being told
+	// the failure, never a clean end. Neither guard can be reached from the other's
+	// path without Close, so the order only matters after one.
 	if r.sticky != nil {
 		return nil, zero, r.sticky
+	}
+	if r.returnedEOF {
+		return nil, zero, io.EOF
 	}
 	f, err, ok := r.next()
 	if !ok {
@@ -143,6 +151,38 @@ func (r *Reader) Next() (*fragment.Fragment, Metadata, error) {
 		r.stop()
 	}
 	return f, m, nil
+}
+
+// Close releases the pull coroutine Next drives. It returns a nil error always,
+// and is spelled to return one so a Reader satisfies io.Closer and reads at the
+// call site as the ordinary defer:
+//
+//	rd := kvs.NewReader(body)
+//	defer rd.Close()
+//
+// IT DOES NOT CLOSE THE UNDERLYING READER, which the caller owns and whose
+// lifetime — an HTTP response body's, typically — this package knows nothing
+// about. That is the one reading the name invites and it is wrong; nothing here
+// touches the source.
+//
+// Close is what makes an EARLY STOP releasable at all. Next releases the
+// coroutine itself when the stream ends, fails, or latches an in-band
+// *StreamError, so a loop that runs to one of those need not call Close and
+// loses nothing by doing so anyway. A caller that leaves the loop before then —
+// end of speech detected, context cancelled, its own consumer gone — has no
+// other way: the coroutine is parked in the iterator's yield, not in a Read, so
+// closing the source does not wake it.
+//
+// It is safe to call more than once and after Next has already reported EOF or
+// an error. It does not discard a latched failure: Next keeps reporting a sticky
+// error after Close, and otherwise reports io.EOF.
+//
+// THE ONE CONSTRAINT IS iter.Pull2's. Close must not run concurrently with Next,
+// so it belongs on the goroutine that drives the loop.
+func (r *Reader) Close() error {
+	r.stop()
+	r.returnedEOF = true
+	return nil
 }
 
 func (r *Reader) metadata(f *fragment.Fragment) Metadata {

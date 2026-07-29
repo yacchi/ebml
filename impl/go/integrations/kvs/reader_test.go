@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"runtime"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/yacchi/ebml/impl/go/ext/fragment"
 	"github.com/yacchi/ebml/impl/go/internal/ebmltest"
@@ -373,6 +375,149 @@ func TestReaderReportsInBandStreamError(t *testing.T) {
 	}
 	if _, _, e := r.Next(); e != err {
 		t.Fatalf("Next after the stream error = %v, want the sticky %v", e, err)
+	}
+}
+
+// settledGoroutines polls until the goroutine count drops to want, or until the
+// deadline, and returns what it last saw. Polling rather than reading once is
+// what keeps this from depending on how promptly a stopped coroutine's goroutine
+// is scheduled to its return; the test still fails if it never gets there.
+func settledGoroutines(want int) int {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		n := runtime.NumGoroutine()
+		if n <= want || time.Now().After(deadline) {
+			return n
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestReaderCloseReleasesTheAbandonedCoroutine pins the reason Close exists.
+// NewReader starts a pull coroutine, and Next releases it only on the paths that
+// end the stream -- EOF, a failure, an in-band error. A caller that stops early
+// takes none of those, and on a live GetMedia read stopping early is the NORMAL
+// termination: end of speech, a cancelled context, a consumer that has gone away.
+//
+// The leak is measured before it is fixed, in the same test, so this cannot pass
+// by asserting a release that was never needed. It leaves nothing leaked behind:
+// the readers it deliberately abandons are closed before it returns.
+func TestReaderCloseReleasesTheAbandonedCoroutine(t *testing.T) {
+	raw := fixture(t, "multi_cluster")
+	const readers = 20
+
+	base := settledGoroutines(runtime.NumGoroutine())
+
+	abandoned := make([]*Reader, 0, readers)
+	for range readers {
+		r := NewReader(bytes.NewReader(raw))
+		// One fragment read and then no more, which parks the coroutine in the
+		// iterator's yield. Nothing done to the source wakes it there -- that is why
+		// closing the underlying reader is not the workaround it looks like.
+		if _, _, err := r.Next(); err != nil {
+			t.Fatalf("first Next: %v", err)
+		}
+		abandoned = append(abandoned, r)
+	}
+	if n := runtime.NumGoroutine(); n < base+readers {
+		t.Fatalf("goroutines = %d after abandoning %d readers, want at least %d -- "+
+			"the leak this test guards is not being reproduced, so its release proves nothing",
+			n, readers, base+readers)
+	}
+
+	for _, r := range abandoned {
+		if err := r.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	}
+	if n := settledGoroutines(base); n > base {
+		t.Fatalf("goroutines = %d after closing %d readers, want back down to %d", n, readers, base)
+	}
+}
+
+// TestReaderCloseIsRepeatableAndAfterEnd covers the calls a defer makes without
+// the caller thinking about them: Close on a Reader Next already ran to EOF, and
+// Close twice. iter.Pull2's stop is documented safe to call repeatedly, which is
+// what lets Close compose with the three release points inside Next unguarded.
+func TestReaderCloseIsRepeatableAndAfterEnd(t *testing.T) {
+	r := NewReader(bytes.NewReader(fixture(t, "topology_basic")))
+	for {
+		if _, _, err := r.Next(); err != nil {
+			if err != io.EOF {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close after EOF: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	if _, _, err := r.Next(); err != io.EOF {
+		t.Fatalf("Next after Close = %v, want io.EOF", err)
+	}
+}
+
+// TestReaderCloseWithoutAnyNext covers the earliest stop there is: a caller that
+// constructs a Reader and abandons it before reading anything, which is what an
+// error on some other resource between NewReader and the loop produces. The
+// coroutine may not have been resumed even once at that point, so this pins that
+// Close does not depend on having been.
+func TestReaderCloseWithoutAnyNext(t *testing.T) {
+	r := NewReader(bytes.NewReader(fixture(t, "multi_cluster")))
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close before any Next: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+	if _, _, err := r.Next(); err != io.EOF {
+		t.Fatalf("Next after Close = %v, want io.EOF", err)
+	}
+}
+
+// TestReaderCloseAfterEarlyStopEndsAsEOF states what a closed Reader answers: it
+// is exhausted, not resumable, and says so with the one error a clean end uses.
+// The coroutine is gone, so there is nothing left to read even though the source
+// still holds bytes.
+func TestReaderCloseAfterEarlyStopEndsAsEOF(t *testing.T) {
+	r := NewReader(bytes.NewReader(fixture(t, "multi_cluster")))
+	if _, _, err := r.Next(); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, _, err := r.Next(); err != io.EOF {
+		t.Fatalf("Next after Close = %v, want io.EOF", err)
+	}
+}
+
+// TestReaderCloseKeepsTheStickyError is the one thing Close must NOT do. A
+// consumer that latched an in-band failure and then ran its deferred Close would,
+// if Close simply marked the Reader ended, see the next call report a clean end --
+// turning a stream KVS stopped on an error back into the short clean end that
+// reporting through Next exists to prevent.
+func TestReaderCloseKeepsTheStickyError(t *testing.T) {
+	r := NewReader(bytes.NewReader(errorTagStream()))
+	var err error
+	for {
+		if _, _, e := r.Next(); e != nil {
+			err = e
+			break
+		}
+	}
+	var streamErr *StreamError
+	if !errors.As(err, &streamErr) {
+		t.Fatalf("Next ended with %v, want a *StreamError", err)
+	}
+	if e := r.Close(); e != nil {
+		t.Fatalf("Close: %v", e)
+	}
+	if _, _, e := r.Next(); e != err {
+		t.Fatalf("Next after Close = %v, want the sticky %v", e, err)
 	}
 }
 

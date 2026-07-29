@@ -245,6 +245,27 @@ Recorded here so the ledger states what passes, not only what does not.
   Question 3 applied to the FIRST implementation of it, which discriminated two
   meanings of `ID` by matching `Msg` — reshaped to a uniform `ID` plus `InHeader`
   before it landed.
+* **`kvs.Reader.Close`** (round 5 F13). Accepted on all three questions, and the
+  first question is the decisive one: `NewReader` starts an `iter.Pull2`
+  coroutine whose `stop` is unexported and only reachable from three branches
+  inside `Next`, so a consumer that stops reading early cannot release it BY ANY
+  MEANS — not by closing the source, since the coroutine is parked in `yield`. It
+  is no second spelling, because nothing delivered it, and its shape adds no
+  option, no callback and no configuration: one method, on the type that owns the
+  resource. The naming question the asker raised — `Close` or `Stop` — went to
+  `Close`, for `io.Closer` and the `defer` idiom, with the "this does not close
+  your reader" disclaimer carried by the doc comment. The general rule it
+  produced is in
+  [Pull shape and node lifetime](pull-and-lifetime.md#whatever-starts-a-pull-coroutine-publishes-the-way-to-release-it);
+  a sweep found this is the repository's only `iter.Pull`/`iter.Pull2` use.
+* **The two modules' version coupling, stated where a consumer looks** (round 5
+  F14). Accepted as documentation and nothing else: `integrations/kvs` puts
+  `ext/fragment` types in its exported signatures, so the pair is one unit of
+  compatibility that the module graph does not express. Recorded in
+  [`impl/go/README.md`](../../impl/go/README.md), next to the requirement text
+  that already explains why the second module must be named. A `replace`
+  directive was NOT added — it would bind consumers to this repository's layout —
+  and tagged releases remain the real answer.
 * **A named PutMedia profile in `integrations/kvs`** (round 4 F11). Accepted:
   a Cluster size strategy and what `x-amzn-fragment-timecode-type` makes
   `Cluster.Timestamp` MEAN are that system's layout knowledge, which is exactly

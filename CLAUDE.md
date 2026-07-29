@@ -92,6 +92,9 @@ Reading surface — [details](docs/design-rules/pull-and-lifetime.md):
   `Nodes() iter.Seq2[parser.Node, error]` with no exported `Next`.
 * A pull has THREE outcomes; a two-outcome protocol may only carry them where
   the layer owns the byte source.
+* WHATEVER STARTS A PULL COROUTINE publishes the way to release it —
+  `integrations/kvs.Reader` is the only one, and `Close` is it. An early stop is
+  the normal termination of a live read, not the exception.
 
 Errors — [details](docs/design-rules/errors-and-recovery.md):
 

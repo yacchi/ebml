@@ -62,6 +62,15 @@ func inputReader() io.Reader {
 // modest fixed read buffer is fine.
 func run(r io.Reader, w io.Writer) error {
 	reader := kvs.NewReader(r)
+	// This loop happens to run to EOF or to an error, both of which release the
+	// Reader's coroutine on their own. The defer is here anyway because a program
+	// reading a LIVE GetMedia body leaves the loop early as a matter of course, and
+	// an example that omits the release teaches the shape that leaks.
+	//
+	// A caller writes `defer reader.Close()`; the discard is spelled out here only
+	// because this tree lints every ignored return into a visible decision. Close
+	// returns nil always.
+	defer func() { _ = reader.Close() }()
 	n := 0
 	for {
 		f, metadata, err := reader.Next()

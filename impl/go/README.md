@@ -102,7 +102,7 @@ central distinction, and the answer decides both the layer and its shape — see
 | Element events, and the library reads | `stream.New` | `Nodes()` iterator; no exported `Next` |
 | One value per completed `Cluster`, you push | `fragment.New` | `Feed(chunk)` returns what was released, then `Finalize` |
 | One value per completed `Cluster`, library reads | `fragment.NewReader` | `Fragments()` iterator; no exported `Next` |
-| KVS fragments with typed metadata | `kvs.NewReader` | `Next()` returns fragment, `Metadata`, error |
+| KVS fragments with typed metadata | `kvs.NewReader` | `Next()` returns fragment, `Metadata`, error; `Close()` releases it early |
 | To write EBML | `writer.New` | `StartMaster`/`EndMaster` plus one method per value type (`Uint`, `Int`, `Float`, `String`, `UTF8`, `Date`, `Binary`, `Leaf`) |
 | To write a retained tree back out | `tree.Marshal` | Byte-identical for every committed fixture |
 
@@ -734,6 +734,14 @@ go get github.com/yacchi/ebml/impl/go
 go get github.com/yacchi/ebml/impl/go/integrations/kvs
 ```
 
+**The two modules are versioned together: upgrade both or neither.** `kvs` puts
+`fragment.Fragment` and `fragment.Option` in its own exported signatures, so the
+pair is one unit of compatibility even though the module graph does not say so.
+Nothing enforces the match — there are no tags yet, both resolve as
+pseudo-versions, and a `go get -u` that moves one and not the other buys either a
+build failure or a silently changed meaning. Until tagged releases exist, pin both
+to the same revision and move them in one change.
+
 In a workspace, both directories are listed:
 
 ```
@@ -758,6 +766,7 @@ import (
 
 func main() {
 	reader := kvs.NewReader(os.Stdin)
+	defer reader.Close()
 	for {
 		fragment, metadata, err := reader.Next()
 		if err == io.EOF {
@@ -770,6 +779,30 @@ func main() {
 	}
 }
 ```
+
+### Stopping early
+
+`kvs.Reader` is the one type in this repository that owns a coroutine:
+`NewReader` turns `fragment.Reader`'s iterator back into a `Next` with
+`iter.Pull2`, because `Next` carries `Metadata` alongside the fragment and a
+range loop cannot. `Next` releases that coroutine when the stream ends, fails,
+or latches an in-band `*StreamError` — every path that ends the stream.
+
+**`Close` releases it on the paths that do not.** Leaving the loop early is the
+normal termination of a live GetMedia read, not an exotic case: end of speech
+detected, the context cancelled, the consumer gone. So `defer reader.Close()`,
+and a loop that did run to EOF loses nothing by it — `Close` is safe to call
+repeatedly and after the end.
+
+`Close` does **not** close the underlying `io.Reader`, which the caller owns; an
+HTTP response body's lifetime is not this package's to decide. Nor is closing the
+source a substitute: the coroutine is parked in the iterator's `yield`, not in a
+`Read`, so nothing done to the source wakes it. A closed `Reader` reports `io.EOF`
+from `Next`, except that a latched failure stays sticky — `Close` never turns a
+stream KVS stopped on an error back into a clean end.
+
+The one constraint is `iter.Pull2`'s: `Close` must not run concurrently with
+`Next`, so it belongs on the goroutine driving the loop.
 
 ### In-band stream errors
 
